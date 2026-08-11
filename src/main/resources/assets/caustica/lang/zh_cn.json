@@ -53,5 +53,11 @@
 	"caustica.options.rt.debugView.4": "粗糙度",
 	"caustica.options.rt.debugView.5": "运动",
 	"caustica.options.rt.debugView.6": "高光",
-	"caustica.options.rt.debugView.7": "高光运动"
+	"caustica.options.rt.debugView.7": "高光运动",
+
+	"caustica.options.rt.roughnessScale": "粗糙度缩放",
+	"caustica.options.rt.roughnessScale.tooltip": "材质粗糙度的全局倍率。数值越低反射越清晰；数值越高反射越模糊。",
+
+	"caustica.options.rt.reflectionScale": "反射缩放",
+	"caustica.options.rt.reflectionScale.tooltip": "镜面反射率 (F0) 的全局倍率。数值越高反射越强；0 表示关闭反射。"
 }

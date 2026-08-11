@@ -172,6 +172,13 @@ Surface evaluateMaterial(MaterialHeader header, float2 atlasUv, float lod, float
         surface.normal = perturbNormal(geometricNormal, p0, p1, p2, uv0, uv1, uv2,
                 vdir, normalAo, surface.ao);
     }
+    // Global roughness/reflection scale packed into skyLook3.zw by RtComposite.skyPush().
+    // Roughness scales the linear GGX alpha (lower = sharper reflections); reflection scales F0.
+    ConstPtr<WorldPush> worldPushRef = ConstPtr<WorldPush>(pc.worldPushAddr);
+    float globalRoughnessScale = worldPushRef[0].skyLook3.z;
+    float globalReflectionScale = worldPushRef[0].skyLook3.w;
+    surface.roughness = clamp(surface.roughness * globalRoughnessScale, 0.0001, 1.0);
+    surface.f0 = clamp(surface.f0 * globalReflectionScale, float3(0.0), float3(1.0));
     return surface;
 }
 

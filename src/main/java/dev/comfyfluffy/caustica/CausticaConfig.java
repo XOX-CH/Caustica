@@ -543,6 +543,12 @@ public final class CausticaConfig {
                     finiteFloat("caustica.rt.jitterSignX", "composite.jitter-sign-x", 1.0f);
             public static final FloatSetting JITTER_SIGN_Y =
                     finiteFloat("caustica.rt.jitterSignY", "composite.jitter-sign-y", -1.0f);
+            // Global material multipliers packed into skyLook3.zw. Roughness scales the linear GGX
+            // alpha (lower = sharper reflections); reflection scales F0 (specular albedo).
+            public static final FloatSetting ROUGHNESS_SCALE =
+                    clampedFloat("caustica.rt.roughnessScale", "composite.roughness-scale", 1.0f, 0.1f, 3.0f);
+            public static final FloatSetting REFLECTION_SCALE =
+                    clampedFloat("caustica.rt.reflectionScale", "composite.reflection-scale", 1.0f, 0.0f, 3.0f);
 
             private Composite() {
             }
