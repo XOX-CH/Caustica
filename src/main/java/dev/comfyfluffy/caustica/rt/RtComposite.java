@@ -1391,7 +1391,9 @@ public final class RtComposite {
                 new Float4(sky.sunDiscHalfAngleDegrees() * toRadians,
                         sky.moonDiscHalfAngleDegrees() * toRadians,
                         viewerAltitudeKm, moonPhase),
-                new Float4(sky.groundAlbedo(), sky.horizonSoftenDegrees() * toRadians, 0f, 0f),
+                new Float4(sky.groundAlbedo(), sky.horizonSoftenDegrees() * toRadians,
+                        CausticaConfig.Rt.Composite.ROUGHNESS_SCALE.value(),
+                        CausticaConfig.Rt.Composite.REFLECTION_SCALE.value()),
                 uv.sun(),
                 uv.moon());
     }

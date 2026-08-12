@@ -58,5 +58,11 @@
 	"caustica.options.rt.debugView.6": "Specular",
 	"caustica.options.rt.debugView.7": "Specular Motion",
 	"caustica.options.rt.debugView.8": "Exposure False Color",
-	"caustica.options.rt.debugView.9": "Metering Weight"
+	"caustica.options.rt.debugView.9": "Metering Weight",
+
+	"caustica.options.rt.roughnessScale": "Roughness Scale",
+	"caustica.options.rt.roughnessScale.tooltip": "Global multiplier for material roughness. Lower values make reflections sharper; higher values make them blurrier.",
+
+	"caustica.options.rt.reflectionScale": "Reflection Scale",
+	"caustica.options.rt.reflectionScale.tooltip": "Global multiplier for specular reflectivity (F0). Higher values increase reflection intensity; 0 disables reflections."
 }

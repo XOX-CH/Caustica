@@ -56,6 +56,8 @@ public final class RtVideoOptions {
             options.add(hdrUiBrightness());
             options.add(hdrPeak());
         }
+        options.add(roughnessScale());
+        options.add(reflectionScale());
         options.add(debugView());
         return options.toArray(OptionInstance<?>[]::new);
     }
@@ -203,6 +205,30 @@ public final class RtVideoOptions {
             new OptionInstance.Enum<>(List.of(0, 1, 2, 3, 4, 5, 6, 7, 8, 9), Codec.INT),
             Math.clamp(setting.value(), 0, 9),
             setting::set);
+    }
+
+    private static OptionInstance<Integer> roughnessScale() {
+        FloatSetting setting = CausticaConfig.Rt.Composite.ROUGHNESS_SCALE;
+        return new OptionInstance<>(
+            "caustica.options.rt.roughnessScale",
+            OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.roughnessScale.tooltip")),
+            (caption, tenths) -> Options.genericValueLabel(caption,
+                    Component.literal(String.format(Locale.ROOT, "%.1fx", tenths / 10.0f))),
+            new OptionInstance.IntRange(1, 30),
+            Math.clamp(Math.round(setting.value() * 10.0f), 1, 30),
+            tenths -> setting.set(tenths / 10.0f));
+    }
+
+    private static OptionInstance<Integer> reflectionScale() {
+        FloatSetting setting = CausticaConfig.Rt.Composite.REFLECTION_SCALE;
+        return new OptionInstance<>(
+            "caustica.options.rt.reflectionScale",
+            OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.reflectionScale.tooltip")),
+            (caption, tenths) -> Options.genericValueLabel(caption,
+                    Component.literal(String.format(Locale.ROOT, "%.1fx", tenths / 10.0f))),
+            new OptionInstance.IntRange(0, 30),
+            Math.clamp(Math.round(setting.value() * 10.0f), 0, 30),
+            tenths -> setting.set(tenths / 10.0f));
     }
 
     private static OptionInstance<Boolean> bool(String captionKey, BooleanSetting setting) {
