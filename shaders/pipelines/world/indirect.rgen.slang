@@ -36,6 +36,8 @@ import bindings;
 // to colour the NEE sun/moonlight, the miss shader reads it to tint the visible discs and stars.
 public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
     float3 L = float3(0.0, 0.0, 0.0);
+    float3 directL = float3(0.0, 0.0, 0.0);
+    bool firstBounceCaptured = false;
     float3 ro = seg.ro;
     float3 rd = seg.rd;
     float3 throughput = seg.throughput;
@@ -102,6 +104,10 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
             // packed show-celestial flag decides whether this path segment may see the bright disc.
             float3 sky = payloadSky();
             L += throughput * sky; // escaped to sky
+            if (!firstBounceCaptured) {
+                directL = L;
+                firstBounceCaptured = true;
+            }
             break;
         }
 
@@ -234,6 +240,10 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
             throughput *= albedo;
             ro = hitPos + n * SURF_BIAS;
             rd = cosineDir(n, seed);
+            if (!firstBounceCaptured) {
+                directL = L;
+                firstBounceCaptured = true;
+            }
             rayConeSpread = max(rayConeSpread, RAY_CONE_DIFFUSE_SPREAD);
             showCelestial = false; // diffuse receiver: direct sun/moon was handled by NEE above
             continue;
@@ -294,6 +304,16 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
             if (medium.current.water && waterWaves && shadow.waterHitT > 0.0) {
                 vis *= waterCaustic(p + lightDir * shadow.waterHitT, lightDir, shadow.waterHitT);
             }
+            // Water shadow tint: how much the water colour tints underwater shadows.
+            // 0 = neutral shadow (no tint); 1 = fully tinted by the water colour.
+            // The shadow is already physically attenuated by the water medium; this is an
+            // additional artistic colour tint that matches the reference mod's behaviour.
+            // Uses custom RGB color mixing (waterColorTint) blended with the biome tint.
+            if (medium.current.water) {
+                float shadowTint = worldPush.waterDetailParams2.y;
+                float3 blendedTint = lerp(worldPush.waterParams.xyz, worldPush.waterColorTint.xyz, worldPush.waterColorTint.w);
+                vis = lerp(vis, vis * blendedTint, shadowTint);
+            }
             if (max(vis.r, max(vis.g, vis.b)) > 0.0) {
                 float3 brdf = diffAlb * INV_PI; // Lambertian diffuse (f = albedo/PI)
                 float3 h = normalize(lightDir + v);
@@ -337,6 +357,11 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
                     visB *= waterCaustic(hitPos + lightDir * shadowBack.waterHitT,
                                          lightDir, shadowBack.waterHitT);
                 }
+                if (medium.current.water) {
+                    float shadowTint = worldPush.waterDetailParams2.y;
+                    float3 blendedTint = lerp(worldPush.waterParams.xyz, worldPush.waterColorTint.xyz, worldPush.waterColorTint.w);
+                    visB = lerp(visB, visB * blendedTint, shadowTint);
+                }
                 if (max(visB.r, max(visB.g, visB.b)) > 0.0) {
                     float cosT = dot(lightDir, rd);
                     L += throughput * diffAlb * sss * SSS_STRENGTH * hg(cosT, SSS_G) * backNdl * celestialLight.illuminance * visB;
@@ -347,7 +372,16 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
         // Preserve all local lighting at the terminal hit, but do not sample a continuation that the
         // bounce loop cannot trace.
         if (bounce >= maxBounces) {
+            if (!firstBounceCaptured) {
+                directL = L;
+                firstBounceCaptured = true;
+            }
             break;
+        }
+
+        if (!firstBounceCaptured) {
+            directL = L;
+            firstBounceCaptured = true;
         }
 
         // Indirect continuation: importance-sample the diffuse OR the GGX specular lobe, chosen by their
@@ -394,6 +428,9 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
             throughput /= q;
         }
     }
+    // Apply user-controlled GI indirect strength: blend between direct-only (0) and full GI (1).
+    float giStrength = worldPush.skyLook4.y;
+    L = lerp(directL, L, giStrength);
     return L;
 }
 
@@ -405,6 +442,8 @@ void main() {
     celestialLight = dominantCelestialLight(skyState(worldPush), transmittanceLut);
     // The path integral is ACEScg end to end; sky.slang works in linear BT.709, so this is the one seam.
     celestialLight.illuminance = bt709ToAcesCg(celestialLight.illuminance);
+    // Apply user-controlled sun color temperature to the celestial light illuminance.
+    celestialLight.illuminance *= sunColorTemperature(worldPush.skyLook4.x);
     uint2 dispatchIndex = DispatchRaysIndex().xy;
     uint2 dimensions = DispatchRaysDimensions().xy;
     int2 pix = int2(dispatchIndex);

@@ -4,6 +4,7 @@
 	"package": "dev.comfyfluffy.caustica.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"client": [
+		"AbstractSelectionListMixin",
 		"BlockModelRenderStateMixin",
 		"BlockModelResolverMixin",
 		"CommandEncoderAccessor",
@@ -16,6 +17,7 @@
 		"MinecraftMixin",
 		"MinecraftReloadMixin",
 		"ModelPartAccessor",
+		"OptionsListAccessor",
 		"OptionsSubScreenAccessor",
 		"ParticleEngineAccessor",
 		"RenderSetupAccessor",

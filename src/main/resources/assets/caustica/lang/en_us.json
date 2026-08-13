@@ -1,4 +1,11 @@
 {
+	"caustica.options.title": "Caustica-DLSS",
+	"key.caustica.openOptions": "Open Caustica-DLSS Options",
+	"caustica.options.reset": "Reset",
+	"caustica.options.detail.open": "Detail Tuning",
+	"caustica.options.detail.title": "Detail Tuning",
+	"caustica.options.detail.header": "Detail Tuning",
+
 	"caustica.options.rt.header": "Ray Tracing",
 
 	"caustica.options.rt.exposureMode": "Exposure",
@@ -64,5 +71,53 @@
 	"caustica.options.rt.roughnessScale.tooltip": "Global multiplier for material roughness. Lower values make reflections sharper; higher values make them blurrier.",
 
 	"caustica.options.rt.reflectionScale": "Reflection Scale",
-	"caustica.options.rt.reflectionScale.tooltip": "Global multiplier for specular reflectivity (F0). Higher values increase reflection intensity; 0 disables reflections."
+	"caustica.options.rt.reflectionScale.tooltip": "Global multiplier for specular reflectivity (F0). Higher values increase reflection intensity; 0 disables reflections.",
+
+	"caustica.options.rt.sunColorTemp": "Sun Color Temperature",
+	"caustica.options.rt.sunColorTemp.tooltip": "Sunlight colour temperature applied to the main sky light. ×0.50 matches the physical sky; ×0.10 shifts cool (blue/white), ×1.00 shifts warm (amber/orange).",
+
+	"caustica.options.rt.giStrength": "GI Indirect Strength",
+	"caustica.options.rt.giStrength.tooltip": "Global indirect lighting strength. ×0.50 is DLSS default (normal GI); ×0.10 reduces GI, ×1.00 boosts GI (internally scaled 5× for stronger effect).",
+
+	"caustica.options.rt.bloomStrength": "Bloom Strength",
+	"caustica.options.rt.bloomStrength.tooltip": "Bloom highlight intensity. ×0.10 is minimal; ×1.00 is normal (internally boosted 10× for stronger effect).",
+
+	"caustica.options.rt.hueShift": "Hue Shift",
+	"caustica.options.rt.hueShift.tooltip": "Rotates the hue of the final image. ×0.50 is neutral; lower values shift toward blue, higher values shift toward orange (60° range in each direction).",
+
+	"caustica.options.rt.saturation": "Saturation",
+	"caustica.options.rt.saturation.tooltip": "Colour saturation of the final image. ×0.10 is greyscale; ×0.50 preserves original saturation; ×1.00 doubles it.",
+
+	"caustica.options.water.open": "Water Detail",
+	"caustica.options.water.title": "Water Detail",
+	"caustica.options.water.header": "Water Detail",
+
+	"caustica.options.rt.waterDensity": "Water Density",
+	"caustica.options.rt.waterDensity.tooltip": "How dense the water medium is. Higher values make underwater visibility shorter and colours more saturated.",
+	"caustica.options.rt.waveStrength": "Wave Strength",
+	"caustica.options.rt.waveStrength.tooltip": "Amplitude of animated water surface waves. Higher values produce choppier glints and more broken reflections.",
+	"caustica.options.rt.waveSpeed": "Wave Speed",
+	"caustica.options.rt.waveSpeed.tooltip": "Speed of animated water surface waves. Higher values make ripples move faster.",
+	"caustica.options.rt.causticMax": "Caustic Brightness",
+	"caustica.options.rt.causticMax.tooltip": "Maximum brightness of underwater light caustics. Higher values produce brighter focus spots; 0 disables caustics.",
+	"caustica.options.rt.waterShadowTint": "Shadow Tint",
+	"caustica.options.rt.waterShadowTint.tooltip": "How much the water colour tints underwater shadows. 0 = neutral shadows; 1 = fully tinted by water colour.",
+	"caustica.options.rt.waterOpacity": "Water Transparency",
+	"caustica.options.rt.waterOpacity.tooltip": "Water transparency control. Higher values make water more transparent; lower values make water more opaque/cloudy.",
+	"caustica.options.rt.waterColorR": "Adv RGB - Red",
+	"caustica.options.rt.waterColorR.tooltip": "Red channel of the custom water colour override (0-1, sRGB). Affects water surface, underwater, shadow, caustic, and transparency. Set Blend to 0.1 to use biome colour.",
+	"caustica.options.rt.waterColorG": "Adv RGB - Green",
+	"caustica.options.rt.waterColorG.tooltip": "Green channel of the custom water colour override (0-1, sRGB). Affects water surface, underwater, shadow, caustic, and transparency.",
+	"caustica.options.rt.waterColorB": "Adv RGB - Blue",
+	"caustica.options.rt.waterColorB.tooltip": "Blue channel of the custom water colour override (0-1, sRGB). Affects water surface, underwater, shadow, caustic, and transparency.",
+	"caustica.options.rt.waterColorBlend": "Adv RGB - Blend",
+	"caustica.options.rt.waterColorBlend.tooltip": "Blend factor between biome water colour and the custom RGB override (0.1-1.0). 0.1 = mostly biome colour, 1 = full custom. Affects water surface, underwater, shadow, caustic, and transparency.",
+	"caustica.options.rt.dlssFg": "DLSS Frame Generation",
+	"caustica.options.rt.dlssFg.tooltip": "NVIDIA DLSS Frame Generation. Interpolates extra frames between rendered frames for higher perceived framerate. Requires supported hardware.",
+	"caustica.options.rt.dlssFgMultiFrame": "Multi-Frame Count",
+	"caustica.options.rt.dlssFgMultiFrame.tooltip": "Number of generated frames per rendered frame. Higher values increase smoothness but require more GPU headroom. 2x = 1 generated, 6x = 5 generated.",
+	"caustica.options.rt.reflex": "NVIDIA Reflex",
+	"caustica.options.rt.reflex.tooltip": "NVIDIA Reflex Low Latency. Reduces system latency by synchronising the simulation loop with the renderer. Requires supported hardware.",
+	"caustica.options.rt.reflexBoost": "Reflex Boost",
+	"caustica.options.rt.reflexBoost.tooltip": "Forces the GPU clock to its maximum frequency while Reflex is active, further reducing latency at the cost of higher power draw."
 }

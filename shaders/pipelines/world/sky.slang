@@ -557,3 +557,27 @@ public CelestialLight dominantCelestialLight(SkyState s, Sampler2D transmittance
     }
     return light;
 }
+
+/**
+ * Color temperature multiplier applied to the dominant celestial light's illuminance.
+ * Maps a 0-1 user slider to a color tint that shifts the sunlight from cool (blue-ish)
+ * through neutral (physical sky colour) to warm (orange-ish).
+ *
+ * @param tempFactor 0 = cool (≈10000K), 0.5 = neutral (physical sky), 1 = warm (≈3000K)
+ * @return RGB multiplier in linear BT.709
+ */
+public float3 sunColorTemperature(float tempFactor) {
+    // Cool: blue-cyan tint. Neutral: identity (no change). Warm: orange-amber tint.
+    // These are artistic tints applied to the physical illuminance, not a physical
+    // blackbody curve — the atmospheric model already handles the real colour shift
+    // with solar altitude.
+    float3 coolTint = float3(1.15, 0.95, 0.85);
+    float3 warmTint = float3(1.00, 0.75, 0.45);
+    if (tempFactor < 0.5) {
+        float t = tempFactor * 2.0; // 0 → 1
+        return lerp(coolTint, float3(1.0, 1.0, 1.0), t);
+    } else {
+        float t = (tempFactor - 0.5) * 2.0; // 0 → 1
+        return lerp(float3(1.0, 1.0, 1.0), warmTint, t);
+    }
+}

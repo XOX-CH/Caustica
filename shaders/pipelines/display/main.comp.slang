@@ -91,6 +91,21 @@ float3 srgbEncode(float3 linearColor) {
             srgbEncodeChannel(linearColor.b));
 }
 
+// Post-tonemap hue rotation in RGB space. hueShift: -1..1 maps to -60°..+60°.
+// Uses the standard hue rotation matrix in YIQ colour space.
+float3 applyHueShift(float3 color, float hueShift) {
+    float angle = hueShift * 1.0471975512; // 60° in radians
+    float s = sin(angle);
+    float c = cos(angle);
+    // Hue rotation matrix (YIQ space)
+    float3x3 m = float3x3(
+        0.299 + 0.701 * c + 0.168 * s,  0.587 - 0.587 * c + 0.330 * s,  0.114 - 0.114 * c - 0.497 * s,
+        0.299 - 0.299 * c - 0.328 * s,  0.587 + 0.413 * c + 0.035 * s,  0.114 - 0.114 * c + 0.292 * s,
+        0.299 - 0.300 * c + 1.250 * s,  0.587 - 0.588 * c - 1.050 * s,  0.114 + 0.886 * c - 0.203 * s
+    );
+    return mul(m, color);
+}
+
 float3 displayGammaSdr(float3 displayColor) {
     float3 code = clamp(displayColor, 0.0, 1.0);
     if (abs(pc.gamma - 1.0) < 1.0e-6) {
@@ -156,9 +171,20 @@ void main(uint3 dispatchId : SV_DispatchThreadID) {
     float3 exposedAcesCg = max(rt.rgb * exposure, float3(0.0));
     exposedAcesCg += sampleBloom(pix, w, h) * max(pc.bloomStrength, 0.0);
     float3 lookedAcesCg = applyLook(exposedAcesCg);
-    outputImage[pix] = float4(tonemap(lookedAcesCg), 1.0);
+
+    // SDR output: tonemap → hue shift → saturation
+    float3 sdrColor = tonemap(lookedAcesCg);
+    sdrColor = applyHueShift(sdrColor, pc.hueShift);
+    float sdrLuma = dot(sdrColor, BT709_LUMA);
+    sdrColor = lerp(float3(sdrLuma), sdrColor, pc.saturation);
+    outputImage[pix] = float4(clamp(sdrColor, 0.0, 1.0), 1.0);
 
     if (pc.hdrEnabled != 0) {
-        hdrImage[pix] = float4(tonemapHdr(lookedAcesCg), 1.0);
+        // HDR output: tonemap → hue shift → saturation
+        float3 hdrColor = tonemapHdr(lookedAcesCg);
+        hdrColor = applyHueShift(hdrColor, pc.hueShift);
+        float hdrLuma = dot(hdrColor, BT2020_LUMA);
+        hdrColor = lerp(float3(hdrLuma), hdrColor, pc.saturation);
+        hdrImage[pix] = float4(clamp(hdrColor, 0.0, 1.0), 1.0);
     }
 }

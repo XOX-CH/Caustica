@@ -56,10 +56,22 @@ public final class CausticaConfig {
     public static void ensureRegistered() {
         @SuppressWarnings("unused")
         Object[] touch = {
-            Rt.ENABLED, Rt.Composite.SPP, Rt.Composite.MAX_BOUNCES, Rt.Terrain.ASYNC_DISPATCH_PER_PASS, Rt.Omm.ENABLED,
+            Rt.ENABLED, Rt.Composite.SPP, Rt.Composite.MAX_BOUNCES, Rt.Composite.GI_STRENGTH,
+            Rt.Terrain.ASYNC_DISPATCH_PER_PASS, Rt.Omm.ENABLED,
             Rt.Entities.ENABLED, Rt.Entities.GLOW_ENABLED, Rt.EntityTextures.MAX_TEXTURES, Rt.DlssRr.ENABLED, Rt.Fg.ENABLED,
-            Rt.Reflex.ENABLED, Rt.Exposure.MODE, Rt.Tonemap.GAMMA, Rt.FrameStats.ENABLED,
+            Rt.Reflex.ENABLED, Rt.Bloom.STRENGTH, Rt.Exposure.MODE, Rt.Tonemap.GAMMA, Rt.Tonemap.HUE_SHIFT,
+            Rt.Tonemap.SATURATION, Rt.Lighting.SUN_COLOR_TEMP, Rt.FrameStats.ENABLED,
             Rt.Screenshots.EXR_ENABLED, Rt.Hdr.ENABLED, Ngx.PATH,
+            CausticaConfig.Rt.Water.WAVE_STRENGTH,
+            CausticaConfig.Rt.Water.WAVE_SPEED,
+            CausticaConfig.Rt.Water.CAUSTIC_BRIGHTNESS,
+            CausticaConfig.Rt.Water.WATER_DENSITY,
+            CausticaConfig.Rt.Water.WATER_OPACITY,
+            CausticaConfig.Rt.Water.WATER_COLOR_R,
+            CausticaConfig.Rt.Water.WATER_COLOR_G,
+            CausticaConfig.Rt.Water.WATER_COLOR_B,
+            CausticaConfig.Rt.Water.WATER_COLOR_BLEND,
+            CausticaConfig.Rt.Water.WATER_SHADOW_TINT,
         };
     }
 
@@ -549,6 +561,8 @@ public final class CausticaConfig {
                     clampedFloat("caustica.rt.roughnessScale", "composite.roughness-scale", 1.0f, 0.1f, 3.0f);
             public static final FloatSetting REFLECTION_SCALE =
                     clampedFloat("caustica.rt.reflectionScale", "composite.reflection-scale", 1.0f, 0.0f, 3.0f);
+            public static final FloatSetting GI_STRENGTH =
+                    clampedFloat("caustica.rt.giStrength", "composite.gi-strength", 0.20f, 0.1f, 1.0f);
 
             private Composite() {
             }
@@ -587,6 +601,31 @@ public final class CausticaConfig {
 
             private Lights() {
             }
+        }
+
+        /** Sun/global lighting adjustments. */
+        public static final class Lighting {
+            // Sun colour temperature: 0 = cool, 0.5 = physical sky (neutral), 1 = warm.
+            public static final FloatSetting SUN_COLOR_TEMP =
+                    clampedFloat("caustica.rt.lighting.sunColorTemp", "lighting.sun-color-temp", 0.5f, 0.1f, 1.0f);
+
+            private Lighting() {
+            }
+        }
+
+        public static final class Water {
+            public static final FloatSetting WAVE_STRENGTH = clampedFloat("caustica.rt.water.waveStrength", "water.wave-strength", 0.3f, 0.0f, 1.0f);
+            public static final FloatSetting WAVE_SPEED = clampedFloat("caustica.rt.water.waveSpeed", "water.wave-speed", 0.8f, 0.0f, 2.0f);
+            public static final FloatSetting CAUSTIC_BRIGHTNESS = clampedFloat("caustica.rt.water.causticBrightness", "water.caustic-brightness", 5.0f, 0.0f, 5.0f);
+            public static final FloatSetting WATER_DENSITY = clampedFloat("caustica.rt.water.waterDensity", "water.density", 0.10f, 0.0f, 0.50f);
+            public static final FloatSetting WATER_OPACITY = clampedFloat("caustica.rt.water.waterOpacity", "water.water-opacity", 1.0f, 0.0f, 1.0f);
+            public static final FloatSetting WATER_COLOR_R = clampedFloat("caustica.rt.water.colorR", "water.color-r", 0.25f, 0.0f, 1.0f);
+            public static final FloatSetting WATER_COLOR_G = clampedFloat("caustica.rt.water.colorG", "water.color-g", 0.46f, 0.0f, 1.0f);
+            public static final FloatSetting WATER_COLOR_B = clampedFloat("caustica.rt.water.colorB", "water.color-b", 0.90f, 0.0f, 1.0f);
+            public static final FloatSetting WATER_COLOR_BLEND = clampedFloat("caustica.rt.water.colorBlend", "water.color-blend", 0.00f, 0.0f, 1.0f);
+            public static final FloatSetting WATER_SHADOW_TINT = clampedFloat("caustica.rt.water.waterShadowTint", "water.water-shadow-tint", 0.5f, 0.0f, 1.0f);
+
+            private Water() {}
         }
 
         public static final class Omm {
@@ -697,6 +736,14 @@ public final class CausticaConfig {
                     intAtLeast("caustica.rt.reflex.minIntervalUs", "reflex.minimum-interval-us", 0, 0);
 
             private Reflex() {
+            }
+        }
+
+        public static final class Bloom {
+            public static final FloatSetting STRENGTH =
+                    clampedFloat("caustica.rt.bloom.strength", "bloom.strength", 1.0f, 0.1f, 1.0f);
+
+            private Bloom() {
             }
         }
 
@@ -819,6 +866,12 @@ public final class CausticaConfig {
         public static final class Tonemap {
             public static final FloatSetting GAMMA =
                     clampedFloat("caustica.rt.tonemap.gamma", "tonemap.gamma", 1.0f, 0.1f, 5.0f);
+            // Hue shift: 0 = -60°, 0.5 = 0° (neutral), 1 = +60°.
+            public static final FloatSetting HUE_SHIFT =
+                    clampedFloat("caustica.rt.tonemap.hueShift", "tonemap.hue-shift", 0.5f, 0.1f, 1.0f);
+            // Saturation: 0 = greyscale, 0.5 = original, 1 = 2x boost.
+            public static final FloatSetting SATURATION =
+                    clampedFloat("caustica.rt.tonemap.saturation", "tonemap.saturation", 0.5f, 0.1f, 1.0f);
 
             private Tonemap() {
             }

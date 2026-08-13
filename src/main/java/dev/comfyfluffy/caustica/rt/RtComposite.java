@@ -1105,6 +1105,11 @@ public final class RtComposite {
             Float4 waterAnchor = new Float4(terrain.blockX & WATER_ANCHOR_MASK,
                     terrain.blockZ & WATER_ANCHOR_MASK, priorWaterWaveTime, 0f);
 
+            float cr = CausticaConfig.Rt.Water.WATER_COLOR_R.value();
+            float cg = CausticaConfig.Rt.Water.WATER_COLOR_G.value();
+            float cb = CausticaConfig.Rt.Water.WATER_COLOR_B.value();
+            float colorBlend = CausticaConfig.Rt.Water.WATER_COLOR_BLEND.value();
+
             // Rebuild the TLAS this frame from static section instances merged with dynamic entity
             // instances, bind it into the pipeline's descriptor ring, record the build, then barrier so
             // the trace sees the finished TLAS. Section BLASes are already built (async, by RtTerrain);
@@ -1137,10 +1142,21 @@ public final class RtComposite {
                     sky.look1(),
                     sky.look2(),
                     sky.look3(),
+                    sky.look4(),
                     sky.sunUv(),
                     sky.moonUv(),
                     waterParams,
                     waterAnchor,
+                    new Float4(
+                        CausticaConfig.Rt.Water.WATER_DENSITY.value(),
+                        CausticaConfig.Rt.Water.WAVE_STRENGTH.value(),
+                        CausticaConfig.Rt.Water.WAVE_SPEED.value(),
+                        CausticaConfig.Rt.Water.CAUSTIC_BRIGHTNESS.value()),
+                    new Float4(
+                        CausticaConfig.Rt.Water.WATER_OPACITY.value(),
+                        CausticaConfig.Rt.Water.WATER_SHADOW_TINT.value(),
+                        0f, 0f),
+                    new Float4(cr, cg, cb, colorBlend),
                     mvCurProjView,
                     breaking.length,
                     breaking,
@@ -1262,7 +1278,11 @@ public final class RtComposite {
                  RtFrameStats.Scope ignoredStats = RtFrameStats.FRAME.stage("frame.displayMap")) {
                 displayPipeline.dispatch(cmd, displayW, displayH, CausticaConfig.Rt.Hdr.enabled(),
                         sdrToneLut.size, CausticaConfig.Rt.Tonemap.GAMMA.value(), loadedHdrLutNits,
-                        true, lookLut.size, LOOK.bloom().strength() / bloomLevels.length);
+                        true, lookLut.size,
+                        LOOK.bloom().strength() / bloomLevels.length * CausticaConfig.Rt.Bloom.STRENGTH.value() * 10.0f,
+                        // hueShift: 0..1 → -1..1; saturation: 0..1 → 0..2
+                        (CausticaConfig.Rt.Tonemap.HUE_SHIFT.value() - 0.5f) * 2.0f,
+                        CausticaConfig.Rt.Tonemap.SATURATION.value() * 2.0f);
             }
             hdrWrittenThisFrame = CausticaConfig.Rt.Hdr.enabled();
             VulkanCommandEncoder.memoryBarrier(cmd, stack); // display output visible to debug composite
@@ -1335,7 +1355,7 @@ public final class RtComposite {
     }
 
     private record SkyPush(Float4 celestial, Float4 look0, Float4 look1, Float4 look2, Float4 look3,
-                           Float4 sunUv, Float4 moonUv) {}
+                           Float4 look4, Float4 sunUv, Float4 moonUv) {}
 
     private record CelestialUv(Float4 sun, Float4 moon) {}
 
@@ -1394,6 +1414,10 @@ public final class RtComposite {
                 new Float4(sky.groundAlbedo(), sky.horizonSoftenDegrees() * toRadians,
                         CausticaConfig.Rt.Composite.ROUGHNESS_SCALE.value(),
                         CausticaConfig.Rt.Composite.REFLECTION_SCALE.value()),
+                // skyLook4: x = sun colour temperature (0.1=cool, 0.5=physical sky, 1=warm),
+                // y = GI indirect strength (×10 internal boost; 0.5=DLSS default, <0.5 reduce, >0.5 boost), z,w reserved.
+                new Float4(CausticaConfig.Rt.Lighting.SUN_COLOR_TEMP.value(),
+                        CausticaConfig.Rt.Composite.GI_STRENGTH.value() * 10.0f, 0.0f, 0.0f),
                 uv.sun(),
                 uv.moon());
     }
