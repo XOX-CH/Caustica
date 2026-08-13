@@ -63,7 +63,9 @@ public final class CausticaConfig {
             Rt.Tonemap.SATURATION, Rt.Lighting.SUN_COLOR_TEMP, Rt.FrameStats.ENABLED,
             Rt.Screenshots.EXR_ENABLED, Rt.Hdr.ENABLED, Ngx.PATH,
             CausticaConfig.Rt.Water.WAVE_STRENGTH,
+            CausticaConfig.Rt.Water.WAVE_HEIGHT,
             CausticaConfig.Rt.Water.WAVE_SPEED,
+            CausticaConfig.Rt.Water.WAVE_PRESET,
             CausticaConfig.Rt.Water.CAUSTIC_BRIGHTNESS,
             CausticaConfig.Rt.Water.WATER_DENSITY,
             CausticaConfig.Rt.Water.WATER_OPACITY,
@@ -72,6 +74,31 @@ public final class CausticaConfig {
             CausticaConfig.Rt.Water.WATER_COLOR_B,
             CausticaConfig.Rt.Water.WATER_COLOR_BLEND,
             CausticaConfig.Rt.Water.WATER_SHADOW_TINT,
+            CausticaConfig.Rt.Water.WAVE_BAND_0,
+            CausticaConfig.Rt.Water.WAVE_BAND_1,
+            CausticaConfig.Rt.Water.WAVE_BAND_2,
+            CausticaConfig.Rt.Water.WAVE_BAND_3,
+            CausticaConfig.Rt.Water.WAVE_BAND_4,
+            CausticaConfig.Rt.Water.WAVE_BAND_5,
+            CausticaConfig.Rt.Water.WAVE_BAND_6,
+            CausticaConfig.Rt.Water.WAVE_BAND_7,
+            CausticaConfig.Rt.Water.WAVE_BAND_8,
+            CausticaConfig.Rt.Water.WAVE_BAND_9,
+            CausticaConfig.Rt.Water.WAVE_BAND_10,
+            CausticaConfig.Rt.Water.PRESET_1,
+            CausticaConfig.Rt.Water.PRESET_2,
+            CausticaConfig.Rt.Water.PRESET_3,
+            CausticaConfig.Rt.Water.PRESET_4,
+            CausticaConfig.Rt.Water.PRESET_5,
+            CausticaConfig.Rt.Water.PRESET_6,
+            CausticaConfig.Rt.Water.PRESET_7,
+            CausticaConfig.Rt.Water.PRESET_8,
+            CausticaConfig.Rt.Water.PRESET_9,
+            CausticaConfig.Rt.Water.PRESET_10,
+            CausticaConfig.Rt.Water.PRESET_11,
+            CausticaConfig.Rt.Water.PRESET_12,
+            CausticaConfig.Rt.Water.PRESET_13,
+            CausticaConfig.Rt.Water.PRESET_14,
         };
     }
 
@@ -615,7 +642,9 @@ public final class CausticaConfig {
 
         public static final class Water {
             public static final FloatSetting WAVE_STRENGTH = clampedFloat("caustica.rt.water.waveStrength", "water.wave-strength", 0.3f, 0.0f, 1.0f);
+            public static final FloatSetting WAVE_HEIGHT = clampedFloat("caustica.rt.water.waveHeight", "water.wave-height", 1.0f, 1.0f, 2.0f);
             public static final FloatSetting WAVE_SPEED = clampedFloat("caustica.rt.water.waveSpeed", "water.wave-speed", 0.8f, 0.0f, 2.0f);
+            public static final IntSetting WAVE_PRESET = clampedInt("caustica.rt.water.wavePreset", "water.wave-preset", 0, 0, 4);
             public static final FloatSetting CAUSTIC_BRIGHTNESS = clampedFloat("caustica.rt.water.causticBrightness", "water.caustic-brightness", 5.0f, 0.0f, 5.0f);
             public static final FloatSetting WATER_DENSITY = clampedFloat("caustica.rt.water.waterDensity", "water.density", 0.10f, 0.0f, 0.50f);
             public static final FloatSetting WATER_OPACITY = clampedFloat("caustica.rt.water.waterOpacity", "water.water-opacity", 1.0f, 0.0f, 1.0f);
@@ -624,6 +653,37 @@ public final class CausticaConfig {
             public static final FloatSetting WATER_COLOR_B = clampedFloat("caustica.rt.water.colorB", "water.color-b", 0.90f, 0.0f, 1.0f);
             public static final FloatSetting WATER_COLOR_BLEND = clampedFloat("caustica.rt.water.colorBlend", "water.color-blend", 0.00f, 0.0f, 1.0f);
             public static final FloatSetting WATER_SHADOW_TINT = clampedFloat("caustica.rt.water.waterShadowTint", "water.water-shadow-tint", 0.5f, 0.0f, 1.0f);
+            public static final FloatSetting WATER_DISPERSION = clampedFloat("caustica.rt.water.waterDispersion", "water.water-dispersion", 0.0f, 0.0f, 1.0f);
+            public static final IntSetting WAVE_COUNT = clampedInt("caustica.rt.water.waveCount", "water.wave-count", 10, 4, 124);
+            public static final FloatSetting CUSTOM_MEANDER = clampedFloat("caustica.rt.water.customMeander", "water.custom-meander", 0.0f, 0.0f, 5.0f);
+            // Per-band amplitude multipliers (0.0–2.0, default 1.0)
+            public static final FloatSetting WAVE_BAND_0 = clampedFloat("caustica.rt.water.waveBand0", "water.wave-band-0", 1.0f, 0.0f, 2.0f);
+            public static final FloatSetting WAVE_BAND_1 = clampedFloat("caustica.rt.water.waveBand1", "water.wave-band-1", 1.0f, 0.0f, 2.0f);
+            public static final FloatSetting WAVE_BAND_2 = clampedFloat("caustica.rt.water.waveBand2", "water.wave-band-2", 1.0f, 0.0f, 2.0f);
+            public static final FloatSetting WAVE_BAND_3 = clampedFloat("caustica.rt.water.waveBand3", "water.wave-band-3", 1.0f, 0.0f, 2.0f);
+            public static final FloatSetting WAVE_BAND_4 = clampedFloat("caustica.rt.water.waveBand4", "water.wave-band-4", 1.0f, 0.0f, 2.0f);
+            public static final FloatSetting WAVE_BAND_5 = clampedFloat("caustica.rt.water.waveBand5", "water.wave-band-5", 1.0f, 0.0f, 2.0f);
+            public static final FloatSetting WAVE_BAND_6 = clampedFloat("caustica.rt.water.waveBand6", "water.wave-band-6", 1.0f, 0.0f, 2.0f);
+            public static final FloatSetting WAVE_BAND_7 = clampedFloat("caustica.rt.water.waveBand7", "water.wave-band-7", 1.0f, 0.0f, 2.0f);
+            public static final FloatSetting WAVE_BAND_8 = clampedFloat("caustica.rt.water.waveBand8", "water.wave-band-8", 1.0f, 0.0f, 2.0f);
+            public static final FloatSetting WAVE_BAND_9 = clampedFloat("caustica.rt.water.waveBand9", "water.wave-band-9", 1.0f, 0.0f, 2.0f);
+            public static final FloatSetting WAVE_BAND_10 = clampedFloat("caustica.rt.water.waveBand10", "water.wave-band-10", 1.0f, 0.0f, 2.0f);
+
+            // Preset storage (semicolon-separated values)
+            public static final StringSetting PRESET_1 = string("caustica.rt.water.preset1", "water.presets.1", "", UnaryOperator.identity());
+            public static final StringSetting PRESET_2 = string("caustica.rt.water.preset2", "water.presets.2", "", UnaryOperator.identity());
+            public static final StringSetting PRESET_3 = string("caustica.rt.water.preset3", "water.presets.3", "", UnaryOperator.identity());
+            public static final StringSetting PRESET_4 = string("caustica.rt.water.preset4", "water.presets.4", "", UnaryOperator.identity());
+            public static final StringSetting PRESET_5 = string("caustica.rt.water.preset5", "water.presets.5", "", UnaryOperator.identity());
+            public static final StringSetting PRESET_6 = string("caustica.rt.water.preset6", "water.presets.6", "", UnaryOperator.identity());
+            public static final StringSetting PRESET_7 = string("caustica.rt.water.preset7", "water.presets.7", "", UnaryOperator.identity());
+            public static final StringSetting PRESET_8 = string("caustica.rt.water.preset8", "water.presets.8", "", UnaryOperator.identity());
+            public static final StringSetting PRESET_9 = string("caustica.rt.water.preset9", "water.presets.9", "", UnaryOperator.identity());
+            public static final StringSetting PRESET_10 = string("caustica.rt.water.preset10", "water.presets.10", "", UnaryOperator.identity());
+            public static final StringSetting PRESET_11 = string("caustica.rt.water.preset11", "water.presets.11", "", UnaryOperator.identity());
+            public static final StringSetting PRESET_12 = string("caustica.rt.water.preset12", "water.presets.12", "", UnaryOperator.identity());
+            public static final StringSetting PRESET_13 = string("caustica.rt.water.preset13", "water.presets.13", "", UnaryOperator.identity());
+            public static final StringSetting PRESET_14 = string("caustica.rt.water.preset14", "water.presets.14", "", UnaryOperator.identity());
 
             private Water() {}
         }

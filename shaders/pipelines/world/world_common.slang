@@ -79,8 +79,12 @@ public struct WorldPush {
     public float4   waterParams;      // xyz linear ACEScg camera-biome water tint, w wave time (s)
     public float4   waterAnchor;      // xy world-stable wave-domain anchor, z previous wave time
     public float4   waterDetailParams;    // x waterDensity, y waveStrength, z waveSpeed, w causticBrightness
-    public float4   waterDetailParams2;   // x waterOpacity, y waterShadowTint, z w reserved
+    public float4   waterDetailParams2;   // x waterOpacity, y waterShadowTint, z wavePreset, w waterDispersion
     public float4   waterColorTint;       // xyz custom RGB (raw sRGB), w blend factor
+    public float4   waterDetailParams3;   // x waveCount (float, cast to int), y customMeander, z w reserved
+    public float4   waterDetailParams4;   // per-band amplitude multipliers: bands 0..3
+    public float4   waterDetailParams5;   // per-band amplitude multipliers: bands 4..7
+    public float4   waterDetailParams6;   // per-band amplitude multipliers: bands 8..10 (w unused)
     public float4x4 curViewProj;      // forward camera-relative view-projection
     public uint     breakCount;
     public BreakEntry breaking[8];    // Java capacity and breakCount serialization are generated from this

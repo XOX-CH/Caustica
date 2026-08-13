@@ -27,8 +27,6 @@ public final class RtWaterOptions {
     /** Water detail options, in display order. */
     public static ResetableOption[] waterOptions() {
         return new ResetableOption[] {
-            waveStrength(),
-            waveSpeed(),
             causticBrightness(),
             waterDensity(),
             waterShadowTint(),
@@ -69,16 +67,6 @@ public final class RtWaterOptions {
                 hundredths -> setting.set(hundredths / 100.0f));
         option.set(Math.clamp(Math.round(setting.value() * 100.0f), hundredthsMin, hundredthsMax));
         return new ResetableOption(option, hundredthsDefault);
-    }
-
-    private static ResetableOption waveStrength() {
-        return tenthsSlider("caustica.options.rt.waveStrength",
-                CausticaConfig.Rt.Water.WAVE_STRENGTH, 0, 10, 3);
-    }
-
-    private static ResetableOption waveSpeed() {
-        return tenthsSlider("caustica.options.rt.waveSpeed",
-                CausticaConfig.Rt.Water.WAVE_SPEED, 0, 10, 8);
     }
 
     private static ResetableOption causticBrightness() {

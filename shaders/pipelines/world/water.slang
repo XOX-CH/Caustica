@@ -17,10 +17,37 @@
 import world_common;
 import world_core;
 
-public static const int   WAVE_COUNT = 10;            // λ = 14 m … 0.38 m (each octave 1.5× shorter)
+public static const int   WAVE_COUNT = 16;            // λ = 14 m … 0.032 m (each octave 1.5× shorter); dynamic count via push constant
 public static const float WAVE_G = 9.81;
-public static const float2 WAVE_WIND = normalize(float2(1.0, 0.35)); // dominant travel direction
+public static const float2 WAVE_WIND = normalize(float2(1.0, 0.35)); // dominant travel direction (preset 0)
+public static const float2 WAVE_WIND_SWELL = normalize(float2(1.0, 0.20)); // preset 1: narrow swell
+public static const float2 WAVE_WIND_CHOP = normalize(float2(1.0, 0.50));  // preset 2: broad wind chop
 public static const float WAVE_MEANDER = 1.1;         // crest phase-wobble amplitude (rad) on the long components
+
+// Preset parameter arrays for the wave spectrum. Each preset defines a different energy distribution
+// across wavelengths, crest sharpness, directional spread, and meander behaviour.
+// Preset 0 (默认): balanced spectrum, moderate meander on long waves
+public static const float Q_DEFAULT[WAVE_COUNT] = { 0.030, 0.035, 0.042, 0.050, 0.060, 0.065, 0.065, 0.058, 0.048, 0.038, 0.030, 0.024, 0.019, 0.015, 0.012, 0.010 };
+// Preset 1 (涌浪): long-wave dominant, strong meandering, narrow spread, gentle crests
+public static const float Q_SWELL[WAVE_COUNT] = { 0.060, 0.055, 0.045, 0.035, 0.025, 0.020, 0.015, 0.010, 0.008, 0.005, 0.004, 0.003, 0.002, 0.002, 0.001, 0.001 };
+// Preset 2 (疾风): short-wave dominant, no meander, wide spread, sharp crests
+public static const float Q_CHOP[WAVE_COUNT] = { 0.010, 0.015, 0.025, 0.035, 0.050, 0.065, 0.080, 0.085, 0.075, 0.060, 0.050, 0.040, 0.032, 0.025, 0.020, 0.015 };
+// Preset 3 (随机波): no wind direction, each wave travels independently across the full circle,
+// creating a multi-dimensional "confused sea" with waves crossing from all angles.
+public static const float Q_RANDOM[WAVE_COUNT] = { 0.045, 0.050, 0.055, 0.060, 0.055, 0.050, 0.045, 0.040, 0.035, 0.030, 0.025, 0.020, 0.016, 0.012, 0.010, 0.008 };
+// Preset 4 (涟漪): circular ripple waves radiating from point sources.  Each wave is a concentric
+// ring expanding from a fixed world-space origin, creating a pond-ripple interference pattern.
+public static const float Q_RIPPLE[WAVE_COUNT] = { 0.035, 0.045, 0.055, 0.060, 0.055, 0.045, 0.035, 0.028, 0.022, 0.018, 0.015, 0.012, 0.010, 0.008, 0.006, 0.005 };
+
+// Deterministic world-space source positions for the circular ripple preset (preset 4).
+// Each wave index maps to a fixed point spread across a 100×100 block, so the pattern is
+// stable across frames and looks like a complex interference of overlapping pond ripples.
+public float2 circularSource(int index) {
+    float a = float(index) * 2.399963f;          // golden angle rad (~137.5°)
+    float r = 5.0f + float(index) * 3.5f;         // radial distance grows with index
+    return float2(cos(a), sin(a)) * r;
+}
+
 public float waterWaveLodWeight(float wavelength, float footprint) {
     float cyclesPerPixel = max(footprint, 0.0) / max(wavelength, 1.0e-4);
     return 1.0 - smoothstep(0.25, 0.5, cyclesPerPixel);
@@ -31,42 +58,144 @@ public float waterWaveLodWeight(float wavelength, float footprint) {
 // gradient — the trigonometry is shared, but the chain-rule work is not free.
 public void waterWaveSpectrum<let WITH_DT : int>(float2 p, float t, float footprint,
                                           out float2 grad, out float2 gradDt) {
-    // Per-wave steepness a·k: gentle in the long swell, concentrated in the mid/short chop.
-    const float Q[WAVE_COUNT] = { 0.030, 0.035, 0.042, 0.050, 0.060, 0.065, 0.065, 0.058, 0.048, 0.038 };
+    // Read wave preset from push constant (0=默认, 1=涌浪, 2=疾风, 3=随机波, 4=涟漪). The uniform branch is
+    // compiled once per draw call so the per-wave conditionals are free.
+    int preset = int(worldPush.waterDetailParams2.z + 0.5);
+
+    // Select preset parameters: crest sharpness, directional spread, meander, and wind direction.
+    float S_base, S_step;
+    float spreadBase, spreadStep;
+    float meanderAmp;
+    int meanderLimit;
+    float2 windDir;
+    bool useWindDir = true;  // false for random wave (each wave uses its own direction)
+    bool useCircular = false; // true for circular ripple (preset 4)
+
+    if (preset == 0) {
+        S_base = 1.2; S_step = 0.12;
+        spreadBase = 0.15; spreadStep = 0.11;
+        meanderAmp = WAVE_MEANDER; meanderLimit = 4;
+        windDir = WAVE_WIND;
+    } else if (preset == 1) {
+        // 涌浪 (Swell): gentler crests, narrow spread, strong meandering on 6 components
+        S_base = 1.0; S_step = 0.08;
+        spreadBase = 0.08; spreadStep = 0.08;
+        meanderAmp = 2.5; meanderLimit = 6;
+        windDir = WAVE_WIND_SWELL;
+    } else if (preset == 2) {
+        // 疾风 (Wind Chop): sharper crests, wide spread, no meander
+        S_base = 1.5; S_step = 0.15;
+        spreadBase = 0.20; spreadStep = 0.15;
+        meanderAmp = 0.0; meanderLimit = 0;
+        windDir = WAVE_WIND_CHOP;
+    } else if (preset == 3) {
+        // 随机波 (Random Wave): no wind direction, each wave travels independently
+        // across the full circle, creating a multi-dimensional "confused sea"
+        S_base = 1.2; S_step = 0.12;
+        spreadBase = 3.0; spreadStep = 0.0;  // Full circle spread
+        meanderAmp = 0.8; meanderLimit = 3;   // Light meander on longest waves
+        useWindDir = false;
+    } else {
+        // 涟漪 (Circular Ripple): point-source concentric rings radiating from fixed world-space
+        // origins.  Each wave is a circular ripple expanding outward, creating a complex
+        // interference pattern of overlapping pond ripples — no wind direction, no meander.
+        S_base = 1.0; S_step = 0.10;
+        spreadBase = 0.0; spreadStep = 0.0;
+        meanderAmp = 0.0; meanderLimit = 0;
+        useWindDir = false;
+        useCircular = true;
+    }
+
+    // Custom meander override: if the push constant meander value > 0, it replaces
+    // the preset's meander amplitude.  This lets the user dial in any amount of
+    // wave-front bending regardless of the current preset.
+    float customMeander = worldPush.waterDetailParams3.y;
+    if (customMeander > 0.0) {
+        meanderAmp = customMeander;
+    }
+
+    // Dynamic wave count from the push constant (4..16).  Limits the number of
+    // wave components actually evaluated, so the user can trade detail for
+    // performance or force a simpler spectrum.
+    int waveCount = int(worldPush.waterDetailParams3.x + 0.5);
+    waveCount = clamp(waveCount, 4, WAVE_COUNT);
+
+    // Per-wave steepness a·k
+    // The Q array is selected per wavelength inside the loop below.
     t *= worldPush.waterDetailParams.z;
     grad = float2(0.0, 0.0);
     gradDt = float2(0.0, 0.0);
     float lambda = 14.0;
-    for (int i = 0; i < WAVE_COUNT; i++) {
+    for (int i = 0; i < waveCount; i++) {
         float lodWeight = waterWaveLodWeight(lambda, footprint);
         if (lodWeight <= 0.0) break;
         float k = 2.0 * PI / lambda;
         float w = sqrt(WAVE_G * k);   // deep-water dispersion: phase speed √(g/k)
-        // Heading: deterministic irregular spread about the wind, widening down the spectrum.
-        float spread = (0.15 + 0.11 * float(i)) * sin(float(i) * 2.4 + 1.3);
-        float cs = cos(spread), sn = sin(spread);
-        float2 d = float2(WAVE_WIND.x * cs - WAVE_WIND.y * sn, WAVE_WIND.x * sn + WAVE_WIND.y * cs);
-        float ph = k * dot(d, p) - w * t + 1.7 * float(i) * float(i);
-        float2 dph = k * d;
-        float phDt = -w;                      // ∂φ/∂t
-        float2 dphDt = float2(0.0, 0.0);      // ∂(∇φ)/∂t
-        if (i < 4) { // meander only the components whose fronts are long enough to read as lines
-            float2 pd = float2(-d.y, d.x);
-            float wph = 0.4 * k * dot(pd, p) + 0.5 * w * t;
-            ph += WAVE_MEANDER * sin(wph);
-            dph += (WAVE_MEANDER * cos(wph) * 0.4 * k) * pd;
-            if (WITH_DT != 0) {
-                float wphDt = 0.5 * w;
-                phDt += WAVE_MEANDER * cos(wph) * wphDt;
-                dphDt = (-WAVE_MEANDER * sin(wph) * wphDt * 0.4 * k) * pd;
+
+        // Phase and gradient: directional vs circular wave type
+        float ph, phDt;
+        float2 dph, dphDt = float2(0.0, 0.0);
+        if (useCircular) {
+            // Circular ripple: each wave is a concentric ring radiating from a fixed point source.
+            // The phase is k * distance(source, p) - w * t, and the gradient is the radial
+            // direction from source to p.  No meander — circular waves are already curved.
+            float2 sourcePos = circularSource(i);
+            float2 delta = p - sourcePos;
+            float r = length(delta);
+            if (r < 1.0e-4) r = 1.0e-4; // guard against division by zero
+            float2 dir = delta / r;      // radial direction
+            ph = k * r - w * t + 1.7 * float(i) * float(i);
+            dph = k * dir;
+            phDt = -w;
+        } else {
+            // Heading: deterministic irregular spread about the wind, widening down the spectrum.
+            // For random wave preset, the spread angle is used directly as the wave direction
+            // (full circle), giving each wave its own independent travel direction.
+            float spread = (spreadBase + spreadStep * float(i)) * sin(float(i) * 2.4 + 1.3);
+            float cs = cos(spread), sn = sin(spread);
+            float2 d;
+            if (useWindDir) {
+                d = float2(windDir.x * cs - windDir.y * sn, windDir.x * sn + windDir.y * cs);
+            } else {
+                d = float2(cs, sn);  // no wind direction, each wave travels independently
+            }
+            ph = k * dot(d, p) - w * t + 1.7 * float(i) * float(i);
+            dph = k * d;
+            phDt = -w;
+            if (i < meanderLimit) { // meander only the components whose fronts are long enough to read as lines
+                float2 pd = float2(-d.y, d.x);
+                float wph = 0.4 * k * dot(pd, p) + 0.5 * w * t;
+                ph += meanderAmp * sin(wph);
+                dph += (meanderAmp * cos(wph) * 0.4 * k) * pd;
+                if (WITH_DT != 0) {
+                    float wphDt = 0.5 * w;
+                    phDt += meanderAmp * cos(wph) * wphDt;
+                    dphDt = (-meanderAmp * sin(wph) * wphDt * 0.4 * k) * pd;
+                }
             }
         }
-        float S = 1.2 + 0.12 * float(i); // crest sharpness: the short chop is choppier
+        float S = S_base + S_step * float(i); // crest sharpness
         float sinPh = sin(ph);
         float cosPh = cos(ph);
         float e = exp(S * (sinPh - 1.0));
-        // a = Q/k; ∇h = a·S·cos φ·e^{S(sin φ−1)}·∇φ
-        float amplitude = lodWeight * (Q[i] / k) * S;
+        // a = Q/k; ∇h = a·S·cos φ·e^{S(sin φ−1)}·∇φ  (the Q value varies by preset)
+        float q;
+        if (preset == 0) q = Q_DEFAULT[i];
+        else if (preset == 1) q = Q_SWELL[i];
+        else if (preset == 2) q = Q_CHOP[i];
+        else if (preset == 3) q = Q_RANDOM[i];
+        else q = Q_RIPPLE[i];
+        // Per-band amplitude multiplier from push constant sliders
+        float bandMul = 1.0;
+        if (i < 4) {
+            bandMul = worldPush.waterDetailParams4[i];
+        } else if (i < 8) {
+            bandMul = worldPush.waterDetailParams5[i - 4];
+        } else if (i < 11) {
+            bandMul = worldPush.waterDetailParams6[i - 8];
+        }
+        q *= bandMul;
+        float amplitude = lodWeight * (q / k) * S * worldPush.waterDetailParams3.z;
         grad += amplitude * cosPh * e * dph;
         if (WITH_DT != 0) {
             // ∂/∂t of the term above, chain-ruled through φ and ∇φ.
@@ -123,10 +252,11 @@ public static const float CAUSTIC_EPS = 0.25; // finite-difference step (m); als
 
 // Horizontal landing offset of a refracted sun ray entering the surface at world-stable xz, intersected
 // with the receiver plane h metres below. inc = sunlight travel direction (downward, unit).
-public float2 causticLanding(float2 xz, float t, float3 inc, float h) {
+// The ior parameter enables chromatic dispersion: different wavelengths take different paths.
+public float2 causticLanding(float2 xz, float t, float3 inc, float h, float ior) {
     float2 g = waterWaveGrad(xz, t);
     float3 nw = normalize(float3(-g.x, 1.0, -g.y));
-    float3 rdw = refract(inc, nw, 1.0 / WATER_IOR); // air→water: never TIR
+    float3 rdw = refract(inc, nw, 1.0 / ior); // air→water: never TIR
     return xz + rdw.xz * (h / max(-rdw.y, 0.05));
 }
 
@@ -139,15 +269,46 @@ public float3 waterCaustic(float3 exitPos, float3 lightDir, float waterDist) {
     float t = worldPush.waterParams.w;
     float3 inc = -lightDir;
     float2 base = exitPos.xz + worldPush.waterAnchor.xy;  // world-stable wave domain (same as applyWaterWaves)
-    float2 p0 = causticLanding(base, t, inc, h);
-    float2 px = causticLanding(base + float2(CAUSTIC_EPS, 0.0), t, inc, h);
-    float2 pz = causticLanding(base + float2(0.0, CAUSTIC_EPS), t, inc, h);
-    float det = abs((px.x - p0.x) * (pz.y - p0.y) - (px.y - p0.y) * (pz.x - p0.x));
-    // Flat water ⇒ all landings displace identically ⇒ det = eps² ⇒ focus = 1 (energy-neutral); the
-    // clamp bounds the fold-line spikes whose energy the surrounding darkening already paid for.
-    float focus = (CAUSTIC_EPS * CAUSTIC_EPS) / max(det, 1.0e-5);
-    float intensity = lerp(1.0, min(focus, worldPush.waterDetailParams.w * 10.0), fade);
-    // Apply custom RGB color mixing: tint the caustic intensity with the blended water color.
-    float3 tinted = intensity * lerp(float3(1.0, 1.0, 1.0), worldPush.waterColorTint.xyz, worldPush.waterColorTint.w);
+
+    // Chromatic dispersion: the refractive index of water varies slightly with wavelength,
+    // causing the R, G, and B caustic patterns to land at slightly different positions.
+    // The dispersion strength controls how much the IORs separate.
+    float dispersion = worldPush.waterDetailParams2.w;
+
+    // RGB wavelength IORs: red has lower IOR (less bending), blue has higher (more bending).
+    // Physical water dispersion (Abbe ~55) gives n_diff ≈ 0.005, which is too small to
+    // produce visible separation in the caustic Jacobian (the landing-point shift is far
+    // smaller than CAUSTIC_EPS = 0.25 m).  We scale the IOR separation up by 20× for a
+    // visible decorative effect.  At dispersion = 0 all three IORs are equal (disabled).
+    float iorR = 1.333 - 0.1 * dispersion;
+    float iorG = 1.333;                    // green channel baseline
+    float iorB = 1.333 + 0.1 * dispersion;
+
+    // ---- Evaluate three separate caustic Jacobians, one per wavelength
+    // Red channel
+    float2 p0r = causticLanding(base, t, inc, h, iorR);
+    float2 pxr = causticLanding(base + float2(CAUSTIC_EPS, 0.0), t, inc, h, iorR);
+    float2 pzr = causticLanding(base + float2(0.0, CAUSTIC_EPS), t, inc, h, iorR);
+    float detr = abs((pxr.x - p0r.x) * (pzr.y - p0r.y) - (pxr.y - p0r.y) * (pzr.x - p0r.x));
+    float focusR = (CAUSTIC_EPS * CAUSTIC_EPS) / max(detr, 1.0e-5);
+    float causticR = lerp(1.0, min(focusR, worldPush.waterDetailParams.w * 300.0), fade);
+    // Green channel
+    float2 p0g = causticLanding(base, t, inc, h, iorG);
+    float2 pxg = causticLanding(base + float2(CAUSTIC_EPS, 0.0), t, inc, h, iorG);
+    float2 pzg = causticLanding(base + float2(0.0, CAUSTIC_EPS), t, inc, h, iorG);
+    float detg = abs((pxg.x - p0g.x) * (pzg.y - p0g.y) - (pxg.y - p0g.y) * (pzg.x - p0g.x));
+    float focusG = (CAUSTIC_EPS * CAUSTIC_EPS) / max(detg, 1.0e-5);
+    float causticG = lerp(1.0, min(focusG, worldPush.waterDetailParams.w * 300.0), fade);
+    // Blue channel
+    float2 p0b = causticLanding(base, t, inc, h, iorB);
+    float2 pxb = causticLanding(base + float2(CAUSTIC_EPS, 0.0), t, inc, h, iorB);
+    float2 pzb = causticLanding(base + float2(0.0, CAUSTIC_EPS), t, inc, h, iorB);
+    float detb = abs((pxb.x - p0b.x) * (pzb.y - p0b.y) - (pxb.y - p0b.y) * (pzb.x - p0b.x));
+    float focusB = (CAUSTIC_EPS * CAUSTIC_EPS) / max(detb, 1.0e-5);
+    float causticB = lerp(1.0, min(focusB, worldPush.waterDetailParams.w * 300.0), fade);
+
+    // Compose the RGB caustic and apply the color tint blend
+    float3 chromatic = float3(causticR, causticG, causticB);
+    float3 tinted = chromatic * lerp(float3(1.0, 1.0, 1.0), worldPush.waterColorTint.xyz, worldPush.waterColorTint.w);
     return tinted;
 }

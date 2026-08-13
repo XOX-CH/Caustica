@@ -1155,8 +1155,28 @@ public final class RtComposite {
                     new Float4(
                         CausticaConfig.Rt.Water.WATER_OPACITY.value(),
                         CausticaConfig.Rt.Water.WATER_SHADOW_TINT.value(),
-                        0f, 0f),
+                        (float) CausticaConfig.Rt.Water.WAVE_PRESET.value(),
+                        CausticaConfig.Rt.Water.WATER_DISPERSION.value()),
                     new Float4(cr, cg, cb, colorBlend),
+                    new Float4(
+                        (float) CausticaConfig.Rt.Water.WAVE_COUNT.value(),
+                        CausticaConfig.Rt.Water.CUSTOM_MEANDER.value(),
+                        CausticaConfig.Rt.Water.WAVE_HEIGHT.value(), 0f),
+                    new Float4(
+                        CausticaConfig.Rt.Water.WAVE_BAND_0.value(),
+                        CausticaConfig.Rt.Water.WAVE_BAND_1.value(),
+                        CausticaConfig.Rt.Water.WAVE_BAND_2.value(),
+                        CausticaConfig.Rt.Water.WAVE_BAND_3.value()),
+                    new Float4(
+                        CausticaConfig.Rt.Water.WAVE_BAND_4.value(),
+                        CausticaConfig.Rt.Water.WAVE_BAND_5.value(),
+                        CausticaConfig.Rt.Water.WAVE_BAND_6.value(),
+                        CausticaConfig.Rt.Water.WAVE_BAND_7.value()),
+                    new Float4(
+                        CausticaConfig.Rt.Water.WAVE_BAND_8.value(),
+                        CausticaConfig.Rt.Water.WAVE_BAND_9.value(),
+                        CausticaConfig.Rt.Water.WAVE_BAND_10.value(),
+                        0f),
                     mvCurProjView,
                     breaking.length,
                     breaking,
