@@ -77,6 +77,10 @@ public struct DisplayPush {
     // SUM of every band, so RtComposite folds the 1/levelCount normalisation into this value: the authored
     // look-package strength then means the same thing whichever level count the resolution supports.
     public float bloomStrength;
+    // Post-tonemap colour grading. hueShift: -1..1 maps to -60°..+60° hue rotation.
+    // saturation: 0=greyscale, 1=original, 2=2x boost.
+    public float hueShift;
+    public float saturation;
 };
 
 public struct BloomPush {

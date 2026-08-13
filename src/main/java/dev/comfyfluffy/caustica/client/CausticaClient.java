@@ -1,5 +1,6 @@
 package dev.comfyfluffy.caustica.client;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import dev.comfyfluffy.caustica.CausticaMod;
 import dev.comfyfluffy.caustica.rt.RtContext;
 import dev.comfyfluffy.caustica.rt.RtDeviceBringup;
@@ -14,14 +15,42 @@ import dev.comfyfluffy.caustica.rt.terrain.RtWorkerPool;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.rendering.v1.InvalidateRenderStateCallback;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
+import org.lwjgl.glfw.GLFW;
 
 public final class CausticaClient implements ClientModInitializer {
 	private static boolean rtInitDone = false;
 
+	// Opens the Caustica-DLSS options window. Registered in onInitializeClient (before GameOptions init).
+	private static final KeyMapping CAUSTICA_OPTIONS_KEY = KeyMappingHelper.registerKeyMapping(
+			new KeyMapping("key.caustica.openOptions",
+					InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_K,
+					KeyMapping.Category.MISC));
+
 	@Override
 	public void onInitializeClient() {
 		CausticaMod.LOGGER.info("Caustica client initialized");
+
+		// Toggle the Caustica-DLSS options window from the keybinding. The key is consumed on the client
+		// tick once the game is in a world: pressing it while the window is open closes it back to the
+		// previous screen, otherwise it surfaces the window on top of the current screen.
+		ClientTickEvents.END_CLIENT_TICK.register(client -> {
+			while (CAUSTICA_OPTIONS_KEY.consumeClick()) {
+				Minecraft mc = Minecraft.getInstance();
+				if (mc.gui.screen() instanceof CausticaOptionsScreen open) {
+					// Close via onClose() so the window returns to the screen it was opened from.
+					open.onClose();
+				} else {
+					// Switch via Gui.setScreen (not Minecraft.setScreenAndShow): the latter forces a renderFrame
+					// immediately, which can flash the screen when our RT + DLSS FG pipeline is mid-present. The
+					// window then renders on the next natural frame instead.
+					mc.gui.setScreen(new CausticaOptionsScreen(mc.gui.screen(), mc.options));
+				}
+			}
+		});
 
 		// Class-init runs DebugScreenEntries.register(...) via its ID field; touching the class here
 		// makes the entry discoverable in F3's entry list. Off by default -- the player opts in the

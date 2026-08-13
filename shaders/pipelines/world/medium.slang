@@ -9,10 +9,18 @@
 import world_common;
 import world_core;
 
-public static const float WATER_DENSITY = 0.1;
 public static const float3 WATER_ABSORB_FLOOR = float3(0.015, 0.010, 0.008);
 public float3 waterExtinction(float3 tint) {
-    return WATER_ABSORB_FLOOR + WATER_DENSITY * (float3(1.0, 1.0, 1.0) - clamp(tint, 0.0, 1.0));
+    // Apply custom RGB color mixing: blend the biome tint with the user's custom RGB using the blend
+    // factor stored in waterColorTint.w. User sets this via the "高级 RGB 混色" sliders in the UI.
+    float3 customTint = lerp(clamp(tint, 0.0, 1.0), worldPush.waterColorTint.xyz, worldPush.waterColorTint.w);
+    float density = worldPush.waterDetailParams.x * 5.0;
+    float3 base = WATER_ABSORB_FLOOR + density * (float3(1.0, 1.0, 1.0) - customTint);
+    // Water opacity: minimum opacity multiplier for water. 1 = full opacity (even clear water absorbs);
+    // 0 = no minimum opacity (water can be fully transparent). Multiplied by 0.95 so the floor keeps
+    // deep water from ever reading as clear vacuum, matching the reference mod's behaviour.
+    float opacity = clamp(worldPush.waterDetailParams2.x, 0.0, 1.0);
+    return base * (1.0 - opacity * 0.95);
 }
 
 // A non-water dielectric's tint is a filter over one block of travel rather than a biome water colour, so

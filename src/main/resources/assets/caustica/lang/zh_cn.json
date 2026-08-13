@@ -1,4 +1,11 @@
 {
+	"caustica.options.title": "Caustica-DLSS",
+	"key.caustica.openOptions": "打开 Caustica-DLSS 选项",
+	"caustica.options.reset": "重置",
+	"caustica.options.detail.open": "细节调整",
+	"caustica.options.detail.title": "细节调整",
+	"caustica.options.detail.header": "细节调整",
+
 	"caustica.options.rt.header": "光线追踪",
 
 	"caustica.options.rt.exposureMode": "曝光",
@@ -58,6 +65,60 @@
 	"caustica.options.rt.roughnessScale": "粗糙度缩放",
 	"caustica.options.rt.roughnessScale.tooltip": "材质粗糙度的全局倍率。数值越低反射越清晰；数值越高反射越模糊。",
 
+	"caustica.options.rt.gamma": "伽马值",
+	"caustica.options.rt.gamma.tooltip": "后处理亮度伽马值。低于 1.00 的值会使阴影和中间调变亮，同时保留黑色、白色和色彩比例。",
+
+	"caustica.options.rt.hdrUiBrightness": "HDR 界面亮度",
+	"caustica.options.rt.hdrUiBrightness.tooltip": "在 HDR 显示器上 SDR 界面元素被分配到的绝对亮度（nits）。",
+
 	"caustica.options.rt.reflectionScale": "反射缩放",
-	"caustica.options.rt.reflectionScale.tooltip": "镜面反射率 (F0) 的全局倍率。数值越高反射越强；0 表示关闭反射。"
+	"caustica.options.rt.reflectionScale.tooltip": "镜面反射率 (F0) 的全局倍率。数值越高反射越强；0 表示关闭反射。",
+
+	"caustica.options.rt.sunColorTemp": "太阳色温",
+	"caustica.options.rt.sunColorTemp.tooltip": "太阳光的色温调节。×0.50 匹配物理天空色；×0.10 偏冷（蓝白），×1.00 偏暖（琥珀/橙黄）。",
+
+	"caustica.options.rt.giStrength": "间接光照强度",
+	"caustica.options.rt.giStrength.tooltip": "全局间接光照强度。×0.50 为 DLSS 默认值（正常 GI）；×0.10 减少 GI，×1.00 增强 GI（内部已放大 5 倍以增强效果）。",
+
+	"caustica.options.rt.bloomStrength": "泛光强度",
+	"caustica.options.rt.bloomStrength.tooltip": "泛光高光强度。×0.10 为最小泛光；×1.00 为正常强度（内部已放大 10 倍以增强效果）。",
+
+	"caustica.options.rt.hueShift": "色调偏移",
+	"caustica.options.rt.hueShift.tooltip": "旋转最终图像的色调。×0.50 为中性；降低偏蓝，升高偏橙（各方向 ±60° 范围）。",
+
+	"caustica.options.rt.saturation": "饱和度",
+	"caustica.options.rt.saturation.tooltip": "最终图像的色彩饱和度。×0.10 为灰度；×0.50 保持原始饱和度；×1.00 加倍。",
+
+	"caustica.options.water.open": "水体细节",
+	"caustica.options.water.title": "水体细节",
+	"caustica.options.water.header": "水体细节",
+
+	"caustica.options.rt.waterDensity": "水体密度",
+	"caustica.options.rt.waterDensity.tooltip": "水体介质的密度。数值越高，水下能见度越低，颜色越饱和。",
+	"caustica.options.rt.waveStrength": "波浪强度",
+	"caustica.options.rt.waveStrength.tooltip": "水面波浪动画的幅度。数值越高，波浪越剧烈，反射越破碎。",
+	"caustica.options.rt.waveSpeed": "波浪速度",
+	"caustica.options.rt.waveSpeed.tooltip": "水面波浪动画的速度。数值越高，波纹移动越快。",
+	"caustica.options.rt.causticMax": "焦散亮度",
+	"caustica.options.rt.causticMax.tooltip": "水下焦散效果的最大亮度。数值越高，水底光斑越亮；0 关闭焦散。",
+	"caustica.options.rt.waterShadowTint": "水下阴影",
+	"caustica.options.rt.waterShadowTint.tooltip": "水色对水下阴影的影响程度。0 = 阴影中性；1 = 完全被水色染色。",
+	"caustica.options.rt.waterOpacity": "水体透明度",
+	"caustica.options.rt.waterOpacity.tooltip": "水体透明度控制。数值越高，水越透明；数值越低，水越浑浊/不透明。",
+	"caustica.options.rt.waterColorR": "高级 RGB - 红",
+	"caustica.options.rt.waterColorR.tooltip": "自定义水色覆盖的红色通道 (0-1, sRGB)。影响水面、水下、水下阴影、焦散亮度和水体透明度。将混合度设为 0.1 以使用生物群系颜色。",
+	"caustica.options.rt.waterColorG": "高级 RGB - 绿",
+	"caustica.options.rt.waterColorG.tooltip": "自定义水色覆盖的绿色通道 (0-1, sRGB)。影响水面、水下、水下阴影、焦散亮度和水体透明度。",
+	"caustica.options.rt.waterColorB": "高级 RGB - 蓝",
+	"caustica.options.rt.waterColorB.tooltip": "自定义水色覆盖的蓝色通道 (0-1, sRGB)。影响水面、水下、水下阴影、焦散亮度和水体透明度。",
+	"caustica.options.rt.waterColorBlend": "高级 RGB - 混合",
+	"caustica.options.rt.waterColorBlend.tooltip": "生物群系水色与自定义 RGB 之间的混合度 (0.1-1.0)。0.1 = 大部分使用生物群系颜色；1 = 完全使用自定义颜色。影响水面、水下、水下阴影、焦散亮度和水体透明度。",
+	"caustica.options.rt.dlssFg": "DLSS 补帧",
+	"caustica.options.rt.dlssFg.tooltip": "NVIDIA DLSS 帧生成。在渲染帧之间插值生成额外帧，提升画面流畅度。需要支持的硬件。",
+	"caustica.options.rt.dlssFgMultiFrame": "多帧补帧数",
+	"caustica.options.rt.dlssFgMultiFrame.tooltip": "每渲染帧生成的帧数。数值越高越流畅，但需要更多 GPU 性能余量。2x = 生成1帧，6x = 生成5帧。",
+	"caustica.options.rt.reflex": "NVIDIA Reflex",
+	"caustica.options.rt.reflex.tooltip": "NVIDIA Reflex 低延迟技术。通过同步模拟循环与渲染器来降低系统延迟。需要支持的硬件。",
+	"caustica.options.rt.reflexBoost": "Reflex 加速",
+	"caustica.options.rt.reflexBoost.tooltip": "在 Reflex 启用时将 GPU 时钟强制提升至最高频率，进一步降低延迟，但会增加功耗。"
 }

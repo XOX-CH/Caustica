@@ -70,11 +70,17 @@ public struct WorldPush {
     // x drawn sun half-angle (rad), y drawn moon half-angle (rad), z viewer altitude (km),
     // w moon phase index (0 full .. 4 new).
     public float4   skyLook2;
-    public float4   skyLook3;         // x ground albedo, yzw reserved
+    public float4   skyLook3;         // x ground albedo, y horizon soften, z roughness scale, w reflection scale
+    // x sun color temperature (0=cool, 0.5=physical sky, 1=warm), y gi indirect strength,
+    // z w reserved for future use.
+    public float4   skyLook4;
     public float4   sunUv;            // vanilla sun sprite atlas rect (u0,v0,u1,v1)
     public float4   moonUv;           // vanilla current-moon-phase sprite atlas rect
     public float4   waterParams;      // xyz linear ACEScg camera-biome water tint, w wave time (s)
     public float4   waterAnchor;      // xy world-stable wave-domain anchor, z previous wave time
+    public float4   waterDetailParams;    // x waterDensity, y waveStrength, z waveSpeed, w causticBrightness
+    public float4   waterDetailParams2;   // x waterOpacity, y waterShadowTint, z w reserved
+    public float4   waterColorTint;       // xyz custom RGB (raw sRGB), w blend factor
     public float4x4 curViewProj;      // forward camera-relative view-projection
     public uint     breakCount;
     public BreakEntry breaking[8];    // Java capacity and breakCount serialization are generated from this
