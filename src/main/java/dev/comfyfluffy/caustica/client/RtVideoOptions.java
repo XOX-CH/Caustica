@@ -50,6 +50,7 @@ public final class RtVideoOptions {
             particles(),
             waterWaves(),
             dlssQuality(),
+            dlssRrPreset(),
             dlssFgEnabled(),
             dlssFgMultiFrame(),
             reflexEnabled(),
@@ -202,6 +203,29 @@ public final class RtVideoOptions {
             position -> setting.set(steps.get(position)));
         option.set(initialPosition);
         return new ResetableOption(option, factoryPosition);
+    }
+
+    private static ResetableOption dlssRrPreset() {
+        IntSetting setting = CausticaConfig.Rt.DlssRr.PRESET;
+        // NVSDK_NGX_RayReconstruction_Hint_Render_Preset values:
+        //   0 = Default (NVIDIA recommended)
+        //   1-3 = Preset A-C (deprecated in current SDK, removed in future)
+        //   4   = Preset D (transformer, current default)
+        //   5   = Preset E (latest transformer, required for DoF guide)
+        //   6-7 = Preset F-G (do not use, reverts to default)
+        List<Integer> presets = List.of(0, 4, 5);
+        int factoryPosition = positionOf(presets, setting.defaultValue());
+        int initialPosition = presets.indexOf(presets.contains(setting.value()) ? setting.value() : 0);
+        OptionInstance<Integer> option = new OptionInstance<>(
+            "caustica.options.rt.dlssRrPreset",
+            OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.dlssRrPreset.tooltip")),
+            (caption, position) -> Options.genericValueLabel(caption,
+                    Component.translatable("caustica.options.rt.dlssRrPreset." + presets.get(position))),
+            new OptionInstance.IntRange(0, presets.size() - 1),
+            factoryPosition,
+            position -> setting.set(presets.get(position)));
+        option.set(Math.max(initialPosition, 0));
+        return new ResetableOption(option, Math.max(factoryPosition, 0));
     }
 
     private static ResetableOption dlssFgEnabled() {

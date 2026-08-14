@@ -51,6 +51,12 @@
 	"caustica.options.rt.dlssQuality.2": "质量",
 	"caustica.options.rt.dlssQuality.5": "DLAA",
 
+	"caustica.options.rt.dlssRrPreset": "光线重构模型",
+	"caustica.options.rt.dlssRrPreset.tooltip": "选择 DLSS Ray Reconstruction 使用的 AI 模型。NVIDIA 推荐由驱动自动选择。",
+	"caustica.options.rt.dlssRrPreset.0": "NVIDIA 推荐",
+	"caustica.options.rt.dlssRrPreset.4": "Preset D",
+	"caustica.options.rt.dlssRrPreset.5": "Preset E",
+
 	"caustica.options.rt.debugView": "调试视图",
 	"caustica.options.rt.debugView.tooltip": "显示光线追踪的中间缓冲区，而不是最终图像。",
 	"caustica.options.rt.debugView.0": "关闭",

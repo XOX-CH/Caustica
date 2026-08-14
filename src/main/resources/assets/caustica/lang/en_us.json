@@ -54,6 +54,12 @@
 	"caustica.options.rt.dlssQuality.2": "Quality",
 	"caustica.options.rt.dlssQuality.5": "DLAA",
 
+	"caustica.options.rt.dlssRrPreset": "RR Model",
+	"caustica.options.rt.dlssRrPreset.tooltip": "Select the DLSS Ray Reconstruction AI model. NVIDIA recommends leaving it to the driver.",
+	"caustica.options.rt.dlssRrPreset.0": "NVIDIA Recommended",
+	"caustica.options.rt.dlssRrPreset.4": "Preset D",
+	"caustica.options.rt.dlssRrPreset.5": "Preset E",
+
 	"caustica.options.rt.debugView": "Debug View",
 	"caustica.options.rt.debugView.tooltip": "Inspect ray-tracing buffers and exposure diagnostics after the normal frame has rendered.",
 	"caustica.options.rt.debugView.0": "Off",
