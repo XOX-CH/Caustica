@@ -190,20 +190,17 @@ public final class RtVideoOptions {
 
     private static ResetableOption dlssQuality() {
         IntSetting setting = CausticaConfig.Rt.DlssRr.QUALITY;
-        List<Integer> steps = CausticaConfig.Rt.DlssRr.QUALITY_STEPS;
-        int factoryPosition = positionOf(steps, setting.defaultValue());
-        int initialQuality = steps.contains(setting.value()) ? setting.value() : 0;
-        int initialPosition = steps.indexOf(initialQuality);
+        int factoryDefault = Math.clamp(setting.defaultValue(), 1, 100);
         OptionInstance<Integer> option = new OptionInstance<>(
             "caustica.options.rt.dlssQuality",
             OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.dlssQuality.tooltip")),
-            (caption, position) -> Options.genericValueLabel(caption,
-                    Component.translatable("caustica.options.rt.dlssQuality." + steps.get(position))),
-            new OptionInstance.IntRange(0, steps.size() - 1),
-            factoryPosition,
-            position -> setting.set(steps.get(position)));
-        option.set(initialPosition);
-        return new ResetableOption(option, factoryPosition);
+            (caption, percent) -> Options.genericValueLabel(caption,
+                    Component.literal(percent + "%")),
+            new OptionInstance.IntRange(1, 100),
+            factoryDefault,
+            setting::set);
+        option.set(Math.clamp(setting.value(), 1, 100));
+        return new ResetableOption(option, factoryDefault);
     }
 
     private static ResetableOption dlssRrEnabled() {

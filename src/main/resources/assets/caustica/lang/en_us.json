@@ -1,4 +1,4 @@
-{
+﻿{
 	"caustica.options.title": "Caustica-DLSS",
 	"key.caustica.openOptions": "Open Caustica-DLSS Options",
 	"caustica.options.reset": "Reset",
@@ -46,13 +46,8 @@
 	"caustica.options.rt.hdrPeak": "HDR Peak Brightness",
 	"caustica.options.rt.hdrPeak.tooltip": "Absolute brightness (in nits) highlights roll off toward. Set to your display's peak HDR brightness.",
 
-	"caustica.options.rt.dlssQuality": "DLSS Quality",
-	"caustica.options.rt.dlssQuality.tooltip": "DLSS Ray Reconstruction quality mode. Lower-quality modes render fewer pixels and upscale more aggressively for higher framerates; higher-quality modes render more pixels for a sharper image. Only affects the image when DLSS Ray Reconstruction is enabled.",
-	"caustica.options.rt.dlssQuality.3": "Ultra Performance",
-	"caustica.options.rt.dlssQuality.0": "Performance",
-	"caustica.options.rt.dlssQuality.1": "Balanced",
-	"caustica.options.rt.dlssQuality.2": "Quality",
-	"caustica.options.rt.dlssQuality.5": "DLAA",
+	"caustica.options.rt.dlssQuality": "Render Scale",
+	"caustica.options.rt.dlssQuality.tooltip": "DLSS Ray Reconstruction render scale percentage. Higher values render more pixels for a sharper image at lower framerates. 50% matches the default Performance mode.",
 
 	"caustica.options.rt.dlssRr": "DLSS Ray Reconstruction",
 	"caustica.options.rt.dlssRr.tooltip": "Enable or disable DLSS Ray Reconstruction. Requires supported hardware.",

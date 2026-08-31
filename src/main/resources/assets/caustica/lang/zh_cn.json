@@ -1,4 +1,4 @@
-{
+﻿{
 	"caustica.options.title": "Caustica-DLSS",
 	"key.caustica.openOptions": "打开 Caustica-DLSS 选项",
 	"caustica.options.reset": "重置",
@@ -43,13 +43,8 @@
 	"caustica.options.rt.hdrPeak": "HDR 峰值亮度",
 	"caustica.options.rt.hdrPeak.tooltip": "高光回落目标的绝对亮度（nits）。请设为显示器的 HDR 峰值亮度。",
 
-	"caustica.options.rt.dlssQuality": "DLSS 质量",
-	"caustica.options.rt.dlssQuality.tooltip": "DLSS Ray Reconstruction 质量模式。较低质量模式会渲染更少像素并进行更激进的升频，以获得更高帧率；较高质量模式会渲染更多像素，以获得更清晰的图像。仅在启用 DLSS Ray Reconstruction 时影响画面。",
-	"caustica.options.rt.dlssQuality.3": "超高性能",
-	"caustica.options.rt.dlssQuality.0": "性能",
-	"caustica.options.rt.dlssQuality.1": "平衡",
-	"caustica.options.rt.dlssQuality.2": "质量",
-	"caustica.options.rt.dlssQuality.5": "DLAA",
+	"caustica.options.rt.dlssQuality": "渲染缩放",
+	"caustica.options.rt.dlssQuality.tooltip": "DLSS 光线重构的渲染缩放比例。较高的值渲染更多像素，画面更清晰，帧率更低。50% 相当于默认的性能模式。",
 
 	"caustica.options.rt.dlssRr": "光线重构",
 	"caustica.options.rt.dlssRr.tooltip": "启用或禁用 DLSS 光线重构功能。需要支持的硬件。",

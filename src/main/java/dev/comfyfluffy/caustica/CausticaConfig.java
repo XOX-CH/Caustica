@@ -761,13 +761,11 @@ public final class CausticaConfig {
             public static final BooleanSetting ENABLED = bool("caustica.rt.dlssRr", "dlss-rr.enabled", true);
             public static final IntSetting PRESET = intValue("caustica.rt.dlssRr.preset", "dlss-rr.preset", 6);
 
-            // NVSDK_NGX_PerfQuality_Value. Per NVIDIA's DLSS-RR programming guide, Ray Reconstruction only
-            // supports Performance(0), Balanced(1), Quality(2), Ultra-Performance(3), and DLAA(5) —
-            // Ultra Quality(4) is not a valid PerfQualityValue for RR (its optimal-settings query returns a
-            // zeroed render size for it) and is deliberately excluded here.
-            public static final List<Integer> QUALITY_STEPS = List.of(3, 0, 1, 2, 5);
+            // Render scale percentage (1-100). The render resolution is computed directly from this
+            // percentage of the display resolution, bypassing the NVSDK quality enum. 33 matches the
+            // old "Ultra Performance" mode (~33% render scale).
             public static final IntSetting QUALITY =
-                    intChoice("caustica.rt.dlssRr.quality", "dlss-rr.quality", 0, QUALITY_STEPS);
+                    clampedInt("caustica.rt.dlssRr.quality", "dlss-rr.quality", 33, 1, 100);
 
             private DlssRr() {
             }

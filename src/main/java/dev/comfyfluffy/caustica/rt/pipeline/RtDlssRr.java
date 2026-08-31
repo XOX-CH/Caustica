@@ -126,39 +126,31 @@ public final class RtDlssRr {
     }
 
     /**
-     * Asks NGX what render resolution the current quality mode expects for the given display size.
-     * Returns {@code null} only when RR is off (or already disabled from an earlier failure elsewhere)
-     * — in that state there is no feature to query and the caller should trace at full resolution.
-     * Once RR is active, a failed query (stale shim, old driver, bad NGX result) throws instead of
-     * silently falling back, so a broken render/display sync is never masked.
+     * Computes the render resolution from the current render-scale percentage, bypassing the
+     * NVSDK quality enum. Returns {@code null} only when RR is off (or already disabled from an
+     * earlier failure elsewhere) — in that state the caller should trace at full resolution.
      */
     public int[] queryOptimalRenderSize(int displayWidth, int displayHeight) {
         if (!enabled() || failed) {
             return null;
         }
-        if (!(((GpuDeviceAccessor) RenderSystem.getDevice()).caustica$getBackend() instanceof VulkanDevice device)) {
-            return null;
-        }
-        ensureInitialized(device);
-        if (!lib.hasQueryOptimalDlssd()) {
-            throw new IllegalStateException("ngxshim is missing ngxshim_query_optimal_dlssd (stale native shim)");
-        }
-        try (Arena arena = Arena.ofConfined()) {
-            MemorySegment outWidth = arena.allocate(ValueLayout.JAVA_INT);
-            MemorySegment outHeight = arena.allocate(ValueLayout.JAVA_INT);
-            MemorySegment outSharpness = arena.allocate(ValueLayout.JAVA_FLOAT);
-            int rc = lib.queryOptimalDlssd(displayWidth, displayHeight, quality(), outWidth, outHeight, outSharpness);
-            if (NgxRuntime.ngxFailed(rc)) {
-                throw new IllegalStateException("ngxshim_query_optimal_dlssd failed: 0x" + Integer.toHexString(rc));
-            }
-            int renderWidth = outWidth.get(ValueLayout.JAVA_INT, 0);
-            int renderHeight = outHeight.get(ValueLayout.JAVA_INT, 0);
-            if (renderWidth <= 0 || renderHeight <= 0) {
-                throw new IllegalStateException(
-                        "ngxshim_query_optimal_dlssd returned invalid render size " + renderWidth + "x" + renderHeight);
-            }
-            return new int[] { renderWidth, renderHeight };
-        }
+        int scale = quality();
+        int renderWidth = (int) (displayWidth * scale / 100.0);
+        int renderHeight = (int) (displayHeight * scale / 100.0);
+        return new int[] { renderWidth, renderHeight };
+    }
+
+    /**
+     * Maps the render-scale percentage to the closest NVSDK_NGX_PerfQuality_Value enum value
+     * for the native shim. The actual render size is computed directly from the percentage;
+     * this is only a hint for NGX's internal feature configuration.
+     */
+    private static int nvSdkQualityForPercent(int percent) {
+        if (percent >= 100) return 5;  // DLAA
+        if (percent >= 67) return 2;   // Quality
+        if (percent >= 58) return 1;   // Balanced
+        if (percent >= 50) return 0;   // Performance
+        return 3;                       // Ultra Performance
     }
 
     /**
@@ -175,15 +167,16 @@ public final class RtDlssRr {
         }
         try {
             ensureInitialized(device);
-            int quality = quality();
+            int scalePercent = quality();
+            int nvSdkQuality = nvSdkQualityForPercent(scalePercent);
             int preset = renderPreset();
             if (featureRenderWidth != renderWidth || featureRenderHeight != renderHeight
                     || featureDisplayWidth != displayWidth || featureDisplayHeight != displayHeight
-                    || featureQuality != quality || featurePreset != preset
+                    || featureQuality != scalePercent || featurePreset != preset
                     || isNull(feature)) {
                 releaseFeature(device);
                 feature = lib.createDlssd(cmd, renderWidth, renderHeight, displayWidth, displayHeight,
-                        quality, FEATURE_FLAGS, preset);
+                        nvSdkQuality, FEATURE_FLAGS, preset);
                 if (isNull(feature)) {
                     throw new IllegalStateException("ngxshim_create_dlssd failed: last=0x"
                             + Integer.toHexString(lib.lastResult()));
@@ -192,11 +185,11 @@ public final class RtDlssRr {
                 featureRenderHeight = renderHeight;
                 featureDisplayWidth = displayWidth;
                 featureDisplayHeight = displayHeight;
-                featureQuality = quality;
+                featureQuality = scalePercent;
                 featurePreset = preset;
                 resetHistory = true; // a fresh feature has no temporal history
-                CausticaMod.LOGGER.info("DLSS-RR feature created: {}x{} -> {}x{} (quality {}, preset {})",
-                        renderWidth, renderHeight, displayWidth, displayHeight, quality, preset);
+                CausticaMod.LOGGER.info("DLSS-RR feature created: {}x{} -> {}x{} (scale={}%, nvQuality={}, preset={})",
+                        renderWidth, renderHeight, displayWidth, displayHeight, scalePercent, nvSdkQuality, preset);
             }
             return true;
         } catch (Throwable t) {
