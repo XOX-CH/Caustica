@@ -1,6 +1,9 @@
 package dev.comfyfluffy.caustica.mixin;
 
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
+import com.mojang.blaze3d.framegraph.FrameGraphBuilder;
 import com.mojang.blaze3d.resource.GraphicsResourceAllocator;
 import dev.comfyfluffy.caustica.client.VanillaRenderController;
 import dev.comfyfluffy.caustica.rt.terrain.RtTerrain;
@@ -23,8 +26,8 @@ public abstract class LevelRendererMixin {
 	@Final
 	private LevelRenderState levelRenderState;
 
-	@Inject(method = "render", at = @At("HEAD"), cancellable = true)
-	private void caustica$cancelVanillaWorld(
+	@Inject(method = "render", at = @At("HEAD"))
+	private void caustica$allowVanillaRender(
 			GraphicsResourceAllocator resourceAllocator,
 			DeltaTracker deltaTracker,
 			boolean renderOutline,
@@ -34,22 +37,40 @@ public abstract class LevelRendererMixin {
 			Vector4f fogColor,
 			boolean shouldRenderSky,
 			CallbackInfo ci) {
+		// We always let the vanilla LevelRenderer.render() run to completion so that
+		// compileSections(), uploadTerrainBuffersToGpu(), and updateSectionOcclusion()
+		// execute every frame. Without this, chunks loaded while PT is active never get
+		// their vanilla meshes compiled, making them invisible when PT is toggled off.
+		//
+		// The RT composite (WorldRenderScaler.end() -> RtComposite.composite()) runs
+		// afterward and overwrites the main target with the path-traced output, so the
+		// vanilla rendering is never presented — it only serves chunk compilation.
 		Runnable playerCompiledSectionCallback = this.levelRenderState.playerCompiledSectionCallback;
-		boolean waitingForRtPlayerSection = false;
 		if (VanillaRenderController.rtRuntimeWorkRequested() && playerCompiledSectionCallback != null) {
 			if (RtTerrain.isSectionReady(cameraState.blockPos)) {
 				playerCompiledSectionCallback.run();
 				VanillaRenderController.INSTANCE.markRtPlayerSectionReady();
-			} else {
-				waitingForRtPlayerSection = true;
 			}
 		}
+	}
 
-		if (!VanillaRenderController.INSTANCE.shouldCancelLevelRenderer(waitingForRtPlayerSection)) {
-			return;
+	/**
+	 * Skip the expensive GPU frame graph execution when PT is active. The vanilla
+	 * world rendering is never presented (the RT composite overwrites it), so the
+	 * frame graph's GPU work is pure waste. The chunk compilation phases
+	 * (compileSections, uploadTerrainBuffersToGpu, updateSectionOcclusion) that
+	 * run after the execute() call in the render method are unaffected.
+	 */
+	@WrapOperation(
+			method = "render",
+			at = @At(value = "INVOKE",
+					target = "Lcom/mojang/blaze3d/framegraph/FrameGraphBuilder;execute(Lcom/mojang/blaze3d/resource/GraphicsResourceAllocator;Lcom/mojang/blaze3d/framegraph/FrameGraphBuilder$Inspector;)V")
+	)
+	private void caustica$skipFrameGraphExecute(FrameGraphBuilder frameGraph, GraphicsResourceAllocator allocator,
+			FrameGraphBuilder.Inspector inspector, Operation<Void> original) {
+		if (!VanillaRenderController.rtRuntimeWorkRequested()) {
+			original.call(frameGraph, allocator, inspector);
 		}
-
-		VanillaRenderController.INSTANCE.markWorldSkipped();
-		ci.cancel();
+		// When PT is active, skip the frame graph execution entirely.
 	}
 }

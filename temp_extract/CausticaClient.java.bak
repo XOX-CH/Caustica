@@ -23,6 +23,11 @@ import org.lwjgl.glfw.GLFW;
 
 public final class CausticaClient implements ClientModInitializer {
 	private static boolean rtInitDone = false;
+	/** Tracks the PT-on → PT-off transition so level chunks are refreshed once. */
+	private static boolean wasRtActive = true;
+	/** Throttle RtTerrain.update() to every N ticks when PT is off, reducing CPU overhead. */
+		private static final int PT_OFF_TERRAIN_INTERVAL = 5;
+		private static int ptOffTickCounter;
 
 	// Opens the Caustica-DLSS options window. Registered in onInitializeClient (before GameOptions init).
 	private static final KeyMapping CAUSTICA_OPTIONS_KEY = KeyMappingHelper.registerKeyMapping(
@@ -70,11 +75,30 @@ public final class CausticaClient implements ClientModInitializer {
 					}
 				}
 
-		if (!VanillaRenderController.rtRuntimeWorkRequested()) {
-			// PT is disabled: leave the RT device/context allocated so re-enabling PT stays instant,
-			// but run no PT terrain work here (no silent chunk/terrain loading while PT is off).
-			return;
-		}
+				if (!VanillaRenderController.rtRuntimeWorkRequested()) {
+					// PT is disabled — keep all resources alive so toggling PT back on is instant
+					// (no device or NGX re-init needed). Full shutdown still happens on CLIENT_STOPPING below.
+					if (wasRtActive) {
+							wasRtActive = false;
+							// Chunks are already compiled during PT (the vanilla renderer runs
+							// with frame graph execution skipped), so no allChanged() or
+							// prevCamRotX/Y reset is needed here. The compiled geometry is
+							// immediately available when PT turns off.
+						}
+
+					// Keep RT terrain synced to vanilla's loaded chunks even when PT is off,
+						// so toggling PT back on is instant — the terrain data is already resident.
+						// Throttled to every N ticks to reduce CPU overhead from the streaming fallback.
+						if (rtInitDone && ++ptOffTickCounter % PT_OFF_TERRAIN_INTERVAL == 0) {
+							RtContext ctx = RtContext.currentOrNull();
+							if (ctx != null) {
+								RtFrameStats.FRAME.beginIfInactive();
+								RtTerrain.update(ctx);
+							}
+						}
+					return;
+				}
+				wasRtActive = true;
 
 				// Once RT is up, keep section residency synced to vanilla's loaded chunks around
 				// the player — builds newly-in-range sections, frees out-of-range ones, per tick.

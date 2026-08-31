@@ -486,7 +486,7 @@ public final class RtDeviceBringup {
 
     /** Standalone path: add RT extension names to the (mutable) arg0 list. */
     public static void addExtensions(List<String> augmentedExtensions, VulkanPhysicalDevice physicalDevice) {
-        if (!enabledByProperty() || firstUnsupportedExtension(physicalDevice) != null) {
+        if (firstUnsupportedExtension(physicalDevice) != null) {
             return;
         }
         FeatureSupport support = queryFeatureSupport(physicalDevice);
@@ -512,9 +512,6 @@ public final class RtDeviceBringup {
     /** Add the RT VulkanFeatures to arg2 after the matching extension names have been requested. */
     @SuppressWarnings("unchecked")
     public static void addFeatures(Args args, VulkanPhysicalDevice physicalDevice) {
-        if (!enabledByProperty()) {
-            return;
-        }
         rtRequested = false;
         serBackend = SerBackend.NONE;
         ommEnabled = false;

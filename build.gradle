@@ -261,9 +261,10 @@ def ngxNativePlatforms = [
 		],
 		vendorRoot: { dlssSdkRoot, vendorConfig -> new File(dlssSdkRoot, "lib/Windows_x86_64/${vendorConfig}") },
 		vendorIncludes: [
-			"nvngx_dlssd.dll",
-			"nvngx_dlssg.dll"
-		]
+				"nvngx_dlss.dll",
+				"nvngx_dlssd.dll",
+				"nvngx_dlssg.dll"
+			]
 	],
 	[
 		name: "linux-x64",
@@ -272,9 +273,10 @@ def ngxNativePlatforms = [
 		],
 		vendorRoot: { dlssSdkRoot, vendorConfig -> new File(dlssSdkRoot, "lib/Linux_x86_64/${vendorConfig}") },
 		vendorIncludes: [
-			"libnvidia-ngx-dlssd.so*",
-			"libnvidia-ngx-dlssg.so*"
-		]
+				"libnvidia-ngx-dlss.so*",
+				"libnvidia-ngx-dlssd.so*",
+				"libnvidia-ngx-dlssg.so*"
+			]
 	]
 ]
 def ngxNativePlatformByName = ngxNativePlatforms.collectEntries { platform -> [(platform.name): platform] }

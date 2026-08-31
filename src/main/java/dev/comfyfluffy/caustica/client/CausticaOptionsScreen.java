@@ -27,12 +27,19 @@ public class CausticaOptionsScreen extends OptionsSubScreen {
     /** Width of the per-option reset button; deliberately narrower than a vanilla control. */
     private static final int RESET_WIDTH = 50;
 
+    private final Screen parentScreen;
+
     public CausticaOptionsScreen(Screen lastScreen, Options options) {
         this(lastScreen, options, Component.translatable("caustica.options.title"));
     }
 
     protected CausticaOptionsScreen(Screen lastScreen, Options options, Component title) {
         super(lastScreen, options, title);
+        this.parentScreen = lastScreen;
+    }
+
+    public Screen getParentScreen() {
+        return parentScreen;
     }
 
     @Override
@@ -46,8 +53,10 @@ public class CausticaOptionsScreen extends OptionsSubScreen {
                 Component.translatable("caustica.options.water.open"),
                 button -> this.minecraft.gui.setScreen(new CausticaWaterOptionsScreen(this, this.options)))
                 .build());
+        boolean ptEnabled = CausticaConfig.Rt.ENABLED.value();
         for (ResetableOption row : RtVideoOptions.mainOptions()) {
-            addOptionRow(row);
+            boolean disabled = !ptEnabled && RtVideoOptions.isRrToggle(row.option());
+            addOptionRow(row, disabled);
         }
     }
 
@@ -58,7 +67,16 @@ public class CausticaOptionsScreen extends OptionsSubScreen {
      * closing the menu.
      */
     protected void addOptionRow(ResetableOption row) {
+        addOptionRow(row, false);
+    }
+
+    /**
+     * Appends one option as a row of {@code [option widget][compact reset button]}, with the option
+     * widget and reset button disabled (grayed out, non-interactive) when {@code disabled} is true.
+     */
+    protected void addOptionRow(ResetableOption row, boolean disabled) {
         AbstractWidget control = row.option().createButton(this.options);
+        control.active = !disabled;
         Button reset = Button.builder(
                 Component.translatable("caustica.options.reset"),
                 button -> {
@@ -67,6 +85,7 @@ public class CausticaOptionsScreen extends OptionsSubScreen {
                 })
                 .width(RESET_WIDTH)
                 .build();
+        reset.active = !disabled;
         this.list.addSmall(control, row.option(), reset);
     }
 

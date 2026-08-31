@@ -12,6 +12,7 @@ import java.util.Locale;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.OptionInstance;
 import net.minecraft.client.Options;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
 /**
@@ -35,12 +36,16 @@ public final class RtVideoOptions {
     private RtVideoOptions() {
     }
 
+    /** Caption key for the DLSS Ray Reconstruction toggle, used to identify it for disabled-state logic. */
+    public static final String DLSS_RR_CAPTION = "caustica.options.rt.dlssRr";
+
     /**
      * Runtime-tunable RT options shown in the main Caustica-DLSS window (the ones that are NOT part of
      * the "细节调整" submenu). These are the core RT controls: exposure, sampling, toggles, and DLSS.
      */
     public static ResetableOption[] mainOptions() {
         List<ResetableOption> options = new ArrayList<>(List.of(
+            pathTracingEnabled(),
             exposureMode(),
             manualEv(),
             gamma(),
@@ -52,6 +57,7 @@ public final class RtVideoOptions {
             dlssQuality(),
             dlssRrEnabled(),
             dlssRrPreset(),
+            dlssUpscalePreset(),
             dlssFgEnabled(),
             dlssFgMultiFrame(),
             reflexEnabled(),
@@ -194,8 +200,17 @@ public final class RtVideoOptions {
         OptionInstance<Integer> option = new OptionInstance<>(
             "caustica.options.rt.dlssQuality",
             OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.dlssQuality.tooltip")),
-            (caption, percent) -> Options.genericValueLabel(caption,
-                    Component.literal(percent + "%")),
+            (caption, percent) -> {
+                Component label = switch (percent) {
+                    case 33 -> Component.translatable("caustica.options.rt.dlssQuality.33");
+                    case 50 -> Component.translatable("caustica.options.rt.dlssQuality.50");
+                    case 58 -> Component.translatable("caustica.options.rt.dlssQuality.58");
+                    case 67 -> Component.translatable("caustica.options.rt.dlssQuality.67");
+                    case 100 -> Component.translatable("caustica.options.rt.dlssQuality.100");
+                    default -> Component.literal(percent + "%");
+                };
+                return Options.genericValueLabel(caption, label);
+            },
             new OptionInstance.IntRange(1, 100),
             factoryDefault,
             setting::set);
@@ -203,8 +218,60 @@ public final class RtVideoOptions {
         return new ResetableOption(option, factoryDefault);
     }
 
+    /** Saved RR state restored when path tracing is turned back on. */
+    private static boolean savedRrState = true;
+    /** The most recently created RR toggle OptionInstance, used for disabled-state identification. */
+    private static OptionInstance<?> lastRrToggleInstance;
+
+    /** Returns true when the given option is the DLSS Ray Reconstruction toggle. */
+    public static boolean isRrToggle(OptionInstance<?> option) {
+        return option == lastRrToggleInstance;
+    }
+
+    private static ResetableOption pathTracingEnabled() {
+        BooleanSetting setting = CausticaConfig.Rt.ENABLED;
+        boolean factoryDefault = setting.defaultValue();
+        OptionInstance<Boolean> option = OptionInstance.createBoolean(
+            "caustica.options.rt.pathTracing",
+            OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.pathTracing.tooltip")),
+            factoryDefault,
+            enabled -> {
+                if (setting.value() != enabled) {
+                    if (enabled) {
+                        setting.set(true);
+                        CausticaConfig.Rt.DlssRr.ENABLED.set(savedRrState);
+                    } else {
+                        savedRrState = CausticaConfig.Rt.DlssRr.ENABLED.value();
+                        CausticaConfig.Rt.DlssRr.ENABLED.set(false);
+                        setting.set(false);
+                    }
+                    // Recreate the options screen to refresh the RR toggle's disabled state
+                    Minecraft mc = Minecraft.getInstance();
+                    Screen current = mc.gui.screen();
+                    if (current instanceof CausticaOptionsScreen cos) {
+                        mc.gui.setScreen(new CausticaOptionsScreen(cos.getParentScreen(), mc.options));
+                    }
+                }
+            });
+        option.set(setting.value());
+        return new ResetableOption(option, factoryDefault);
+    }
+
     private static ResetableOption dlssRrEnabled() {
-        return boolResetable("caustica.options.rt.dlssRr", CausticaConfig.Rt.DlssRr.ENABLED);
+        BooleanSetting setting = CausticaConfig.Rt.DlssRr.ENABLED;
+        boolean factoryDefault = setting.defaultValue();
+        OptionInstance<Boolean> option = OptionInstance.createBoolean(
+            DLSS_RR_CAPTION,
+            OptionInstance.cachedConstantTooltip(Component.translatable(DLSS_RR_CAPTION + ".tooltip")),
+            factoryDefault,
+            enabled -> {
+                if (CausticaConfig.Rt.ENABLED.value()) {
+                    setting.set(enabled);
+                }
+            });
+        option.set(setting.value());
+        lastRrToggleInstance = option;
+        return new ResetableOption(option, factoryDefault);
     }
 
     private static ResetableOption dlssRrPreset() {
@@ -221,6 +288,27 @@ public final class RtVideoOptions {
             OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.dlssRrPreset.tooltip")),
             (caption, position) -> Options.genericValueLabel(caption,
                     Component.translatable("caustica.options.rt.dlssRrPreset." + presets.get(position))),
+            new OptionInstance.IntRange(0, presets.size() - 1),
+            factoryPosition,
+            position -> setting.set(presets.get(position)));
+        option.set(Math.max(initialPosition, 0));
+        return new ResetableOption(option, Math.max(factoryPosition, 0));
+    }
+
+    private static ResetableOption dlssUpscalePreset() {
+        IntSetting setting = CausticaConfig.Rt.DlssRr.UPSCALE_PRESET;
+        // NVSDK_NGX_DLSS_Hint_Render_Preset values:
+        //   11  = Preset K (1st gen Transformer, DLAA default)
+        //   12  = Preset L (2nd gen Transformer, Ultra Perf default)
+        //   13  = Preset M (2nd gen Transformer, Perf default)
+        List<Integer> presets = List.of(11, 12, 13);
+        int factoryPosition = positionOf(presets, setting.defaultValue());
+        int initialPosition = presets.indexOf(presets.contains(setting.value()) ? setting.value() : 0);
+        OptionInstance<Integer> option = new OptionInstance<>(
+            "caustica.options.rt.dlssUpscalePreset",
+            OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.dlssUpscalePreset.tooltip")),
+            (caption, position) -> Options.genericValueLabel(caption,
+                    Component.translatable("caustica.options.rt.dlssUpscalePreset." + presets.get(position))),
             new OptionInstance.IntRange(0, presets.size() - 1),
             factoryPosition,
             position -> setting.set(presets.get(position)));

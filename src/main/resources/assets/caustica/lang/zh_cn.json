@@ -1,4 +1,4 @@
-﻿{
+{
 	"caustica.options.title": "Caustica-DLSS",
 	"key.caustica.openOptions": "打开 Caustica-DLSS 选项",
 	"caustica.options.reset": "重置",
@@ -7,6 +7,8 @@
 	"caustica.options.detail.header": "细节调整",
 
 	"caustica.options.rt.header": "光线追踪",
+		"caustica.options.rt.pathTracing": "路径追踪",
+		"caustica.options.rt.pathTracing.tooltip": "路径追踪主开关。关闭后游戏恢复为原版渲染，所有光线追踪选项不可用。",
 
 	"caustica.options.rt.exposureMode": "曝光",
 	"caustica.options.rt.exposureMode.tooltip": "决定如何将光线追踪图像映射到显示亮度。自动会适应场景亮度；手动会直接使用曝光值。",
@@ -44,7 +46,12 @@
 	"caustica.options.rt.hdrPeak.tooltip": "高光回落目标的绝对亮度（nits）。请设为显示器的 HDR 峰值亮度。",
 
 	"caustica.options.rt.dlssQuality": "渲染缩放",
-	"caustica.options.rt.dlssQuality.tooltip": "DLSS 光线重构的渲染缩放比例。较高的值渲染更多像素，画面更清晰，帧率更低。50% 相当于默认的性能模式。",
+	"caustica.options.rt.dlssQuality.tooltip": "DLSS 渲染缩放比例，适用于光线重构和超分辨率（仅上采样）两种模式。较高的值渲染更多像素，画面更清晰，帧率更低。33% 相当于默认的超高性能模式。",
+		"caustica.options.rt.dlssQuality.33": "超级性能",
+		"caustica.options.rt.dlssQuality.50": "性能",
+		"caustica.options.rt.dlssQuality.58": "平衡",
+		"caustica.options.rt.dlssQuality.67": "质量",
+		"caustica.options.rt.dlssQuality.100": "DLAA",
 
 	"caustica.options.rt.dlssRr": "光线重构",
 	"caustica.options.rt.dlssRr.tooltip": "启用或禁用 DLSS 光线重构功能。需要支持的硬件。",
@@ -53,6 +60,13 @@
 	"caustica.options.rt.dlssRrPreset.4": "Preset D",
 	"caustica.options.rt.dlssRrPreset.5": "Preset E",
 	"caustica.options.rt.dlssRrPreset.6": "Preset F",
+
+		"caustica.options.rt.dlssUpscalePreset": "上采样模型",
+		"caustica.options.rt.dlssUpscalePreset.tooltip": "选择 DLSS 超分辨率（上采样）使用的 AI 模型。仅在光线重构关闭时生效。NVIDIA 推荐由驱动自动选择。",
+		
+		"caustica.options.rt.dlssUpscalePreset.11": "Preset K",
+		"caustica.options.rt.dlssUpscalePreset.12": "Preset L",
+		"caustica.options.rt.dlssUpscalePreset.13": "Preset M",
 
 	"caustica.options.rt.debugView": "调试视图",
 	"caustica.options.rt.debugView.tooltip": "显示光线追踪的中间缓冲区，而不是最终图像。",

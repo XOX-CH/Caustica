@@ -13,6 +13,7 @@
 		"GlxMixin",
 		"GuiRendererMixin",
 		"LevelRendererMixin",
+		"LevelExtractorAccessor",
 		"LevelExtractorMixin",
 		"MinecraftMixin",
 		"MinecraftReloadMixin",

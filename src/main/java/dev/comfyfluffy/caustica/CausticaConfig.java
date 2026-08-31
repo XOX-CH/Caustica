@@ -767,6 +767,11 @@ public final class CausticaConfig {
             public static final IntSetting QUALITY =
                     clampedInt("caustica.rt.dlssRr.quality", "dlss-rr.quality", 33, 1, 100);
 
+            // DLSS Super Resolution (upscale-only) preset used when RR is disabled.
+            // NVSDK_NGX_DLSS_Hint_Render_Preset values: 10 = Preset J, 11 = Preset K (1st gen Transformer),
+            // 12 = Preset L (2nd gen Transformer), 13 = Preset M (2nd gen Transformer, default).
+            public static final IntSetting UPSCALE_PRESET = intValue("caustica.rt.dlssRr.upscalePreset", "dlss-rr.upscale-preset", 13);
+
             private DlssRr() {
             }
         }

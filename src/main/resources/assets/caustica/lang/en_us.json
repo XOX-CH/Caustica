@@ -7,6 +7,8 @@
 	"caustica.options.detail.header": "Detail Tuning",
 
 	"caustica.options.rt.header": "Ray Tracing",
+		"caustica.options.rt.pathTracing": "Path Tracing",
+		"caustica.options.rt.pathTracing.tooltip": "Master toggle for the ray-traced path tracer. When disabled, the game reverts to vanilla rendering and all ray-tracing options are inactive.",
 
 	"caustica.options.rt.exposureMode": "Exposure",
 	"caustica.options.rt.exposureMode.tooltip": "How the ray-traced image is mapped to display brightness. Auto adapts to scene luminance; Manual uses the exposure value directly.",
@@ -47,7 +49,12 @@
 	"caustica.options.rt.hdrPeak.tooltip": "Absolute brightness (in nits) highlights roll off toward. Set to your display's peak HDR brightness.",
 
 	"caustica.options.rt.dlssQuality": "Render Scale",
-	"caustica.options.rt.dlssQuality.tooltip": "DLSS Ray Reconstruction render scale percentage. Higher values render more pixels for a sharper image at lower framerates. 50% matches the default Performance mode.",
+	"caustica.options.rt.dlssQuality.tooltip": "DLSS render scale percentage applied to both Ray Reconstruction and Super Resolution (upscale-only) modes. Higher values render more pixels for a sharper image at lower framerates. 33% matches the default Ultra Performance mode.",
+		"caustica.options.rt.dlssQuality.33": "Super Performance",
+		"caustica.options.rt.dlssQuality.50": "Performance",
+		"caustica.options.rt.dlssQuality.58": "Balanced",
+		"caustica.options.rt.dlssQuality.67": "Quality",
+		"caustica.options.rt.dlssQuality.100": "DLAA",
 
 	"caustica.options.rt.dlssRr": "DLSS Ray Reconstruction",
 	"caustica.options.rt.dlssRr.tooltip": "Enable or disable DLSS Ray Reconstruction. Requires supported hardware.",
@@ -57,7 +64,14 @@
 	"caustica.options.rt.dlssRrPreset.5": "Preset E",
 	"caustica.options.rt.dlssRrPreset.6": "Preset F",
 
-	"caustica.options.rt.debugView": "Debug View",
+		"caustica.options.rt.dlssUpscalePreset": "Upscale Model",
+		"caustica.options.rt.dlssUpscalePreset.tooltip": "Select the DLSS Super Resolution AI model used when Ray Reconstruction is disabled. NVIDIA recommends leaving it to the driver.",
+		
+		"caustica.options.rt.dlssUpscalePreset.11": "Preset K",
+		"caustica.options.rt.dlssUpscalePreset.12": "Preset L",
+		"caustica.options.rt.dlssUpscalePreset.13": "Preset M",
+
+		"caustica.options.rt.debugView": "Debug View",
 	"caustica.options.rt.debugView.tooltip": "Inspect ray-tracing buffers and exposure diagnostics after the normal frame has rendered.",
 	"caustica.options.rt.debugView.0": "Off",
 	"caustica.options.rt.debugView.1": "Normals",
