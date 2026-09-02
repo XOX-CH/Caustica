@@ -5,7 +5,7 @@ import java.util.StringJoiner;
 
 /**
  * Manages saving and loading of water detail + wave detail preset snapshots.
- * Each preset stores 26 values covering all settings in the "水体细节" and "水波细分" menus.
+ * Each preset stores 28 values covering all settings in the "水体细节" and "水波细分" menus.
  */
 public final class WaterPresetManager {
     private WaterPresetManager() {
@@ -29,6 +29,20 @@ public final class WaterPresetManager {
 
     /** Saves all current water detail + wave detail setting values into the given preset. */
     public static void savePreset(int index) {
+        configFor(index).set(serialize());
+        CausticaConfig.save();
+        activePreset = index;
+    }
+
+    /** Loads saved values from the given preset into all water detail + wave detail settings. */
+    public static void loadPreset(int index) {
+        if (!deserialize(configFor(index).get())) return;
+        CausticaConfig.save();
+        activePreset = index;
+    }
+
+    /** Serializes the current water detail + wave detail settings into the semicolon-separated preset string. */
+    static String serialize() {
         StringJoiner sj = new StringJoiner(";");
         // Wave detail settings (7)
         sj.add(String.valueOf(CausticaConfig.Rt.Water.WAVE_STRENGTH.value()));
@@ -50,7 +64,7 @@ public final class WaterPresetManager {
         sj.add(String.valueOf(CausticaConfig.Rt.Water.WAVE_BAND_8.value()));
         sj.add(String.valueOf(CausticaConfig.Rt.Water.WAVE_BAND_9.value()));
         sj.add(String.valueOf(CausticaConfig.Rt.Water.WAVE_BAND_10.value()));
-        // Water detail settings (8)
+        // Water detail settings (9)
         sj.add(String.valueOf(CausticaConfig.Rt.Water.CAUSTIC_BRIGHTNESS.value()));
         sj.add(String.valueOf(CausticaConfig.Rt.Water.WATER_DENSITY.value()));
         sj.add(String.valueOf(CausticaConfig.Rt.Water.WATER_OPACITY.value()));
@@ -59,18 +73,20 @@ public final class WaterPresetManager {
         sj.add(String.valueOf(CausticaConfig.Rt.Water.WATER_COLOR_B.value()));
         sj.add(String.valueOf(CausticaConfig.Rt.Water.WATER_COLOR_BLEND.value()));
         sj.add(String.valueOf(CausticaConfig.Rt.Water.WATER_SHADOW_TINT.value()));
-        configFor(index).set(sj.toString());
-        CausticaConfig.save();
-        activePreset = index;
+        sj.add(String.valueOf(CausticaConfig.Rt.Water.CAUSTIC_TILT.value() ? 1.0f : 0.0f));
+        sj.add(String.valueOf(CausticaConfig.Rt.Water.CAUSTIC_REFLECT.value() ? 1.0f : 0.0f));
+        return sj.toString();
     }
 
-    /** Loads saved values from the given preset into all water detail + wave detail settings. */
-    public static void loadPreset(int index) {
-        String data = configFor(index).get();
-        if (data.isEmpty()) return;
+    /**
+     * Parses a preset string into the water detail + wave detail settings. Accepts the current
+     * 28-value format plus the 27-value, 26-value and 18-value (wave-only) formats; fields absent
+     * from a legacy string keep their current values. Returns false for empty or unknown formats.
+     */
+    static boolean deserialize(String data) {
+        if (data.isEmpty()) return false;
         String[] parts = data.split(";");
-        // Accept 26 (current) or 18 (legacy — wave-only preset)
-        if (parts.length != 26 && parts.length != 18) return;
+        if (parts.length != 28 && parts.length != 27 && parts.length != 26 && parts.length != 18) return false;
         int i = 0;
         // Wave detail settings (7)
         CausticaConfig.Rt.Water.WAVE_STRENGTH.set(Float.parseFloat(parts[i++]));
@@ -92,7 +108,7 @@ public final class WaterPresetManager {
         CausticaConfig.Rt.Water.WAVE_BAND_8.set(Float.parseFloat(parts[i++]));
         CausticaConfig.Rt.Water.WAVE_BAND_9.set(Float.parseFloat(parts[i++]));
         CausticaConfig.Rt.Water.WAVE_BAND_10.set(Float.parseFloat(parts[i++]));
-        // Water detail settings (8) — only present in current (26-value) format
+        // Water detail settings — only present in 26/27-value formats
         if (parts.length >= 26) {
             CausticaConfig.Rt.Water.CAUSTIC_BRIGHTNESS.set(Float.parseFloat(parts[i++]));
             CausticaConfig.Rt.Water.WATER_DENSITY.set(Float.parseFloat(parts[i++]));
@@ -103,8 +119,15 @@ public final class WaterPresetManager {
             CausticaConfig.Rt.Water.WATER_COLOR_BLEND.set(Float.parseFloat(parts[i++]));
             CausticaConfig.Rt.Water.WATER_SHADOW_TINT.set(Float.parseFloat(parts[i++]));
         }
-        CausticaConfig.save();
-        activePreset = index;
+        // Caustic tilt flag — only present in 27/28-value formats
+        if (parts.length >= 27) {
+            CausticaConfig.Rt.Water.CAUSTIC_TILT.set(Float.parseFloat(parts[i++]) > 0.5f);
+        }
+        // Caustic reflection flag — only present in the 28-value format
+        if (parts.length >= 28) {
+            CausticaConfig.Rt.Water.CAUSTIC_REFLECT.set(Float.parseFloat(parts[i++]) > 0.5f);
+        }
+        return true;
     }
 
     /** Clears the saved data from the given preset. */

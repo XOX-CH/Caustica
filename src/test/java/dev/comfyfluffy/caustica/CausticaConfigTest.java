@@ -3,8 +3,15 @@ package dev.comfyfluffy.caustica;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class CausticaConfigTest {
+
+    @Test
+    void causticTiltDefaultsOn() {
+        assertTrue(CausticaConfig.Rt.Water.CAUSTIC_TILT.defaultValue());
+    }
+
     @Test
     void invalidPeakNitsFallsBackToDefault() {
         CausticaConfig.IntSetting setting = CausticaConfig.Rt.Hdr.PEAK_NITS;

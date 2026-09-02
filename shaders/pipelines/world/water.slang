@@ -16,6 +16,7 @@
 
 import world_common;
 import world_core;
+import math;
 
 public static const int   WAVE_COUNT = 16;            // λ = 14 m … 0.032 m (each octave 1.5× shorter); dynamic count via push constant
 public static const float WAVE_G = 9.81;
@@ -253,14 +254,41 @@ public static const float CAUSTIC_EPS = 0.25; // finite-difference step (m); als
 // Horizontal landing offset of a refracted sun ray entering the surface at world-stable xz, intersected
 // with the receiver plane h metres below. inc = sunlight travel direction (downward, unit).
 // The ior parameter enables chromatic dispersion: different wavelengths take different paths.
-public float2 causticLanding(float2 xz, float t, float3 inc, float h, float ior) {
+// refrDir returns the refracted ray direction so callers can correct the Jacobian for the receiver's
+// own surface orientation (see causticTiltFactor).
+public float2 causticLanding(float2 xz, float t, float3 inc, float h, float ior, out float3 refrDir) {
     float2 g = waterWaveGrad(xz, t);
     float3 nw = normalize(float3(-g.x, 1.0, -g.y));
     float3 rdw = refract(inc, nw, 1.0 / ior); // air→water: never TIR
+    refrDir = rdw;
     return xz + rdw.xz * (h / max(-rdw.y, 0.05));
 }
 
-public float3 waterCaustic(float3 exitPos, float3 lightDir, float waterDist) {
+// The Jacobian measured on the horizontal reference plane must be refocused onto the receiver's own
+// tangent plane. The refracted light arrives as a near-parallel bundle, so its footprint on a plane
+// with normal n scales by the parallel-projection area ratio |dot(d, n)|/|d.y|: a slope facing the
+// beam focuses brighter, an edge-on surface dims toward zero. Exactly 1 for a horizontal receiver,
+// so flat water bodies are unaffected.
+public float causticTiltFactor(float3 refrDir, float3 receiverNormal) {
+    return abs(dot(refrDir, receiverNormal)) / max(abs(refrDir.y), 0.05);
+}
+
+// Reflection-side landing point: sunlight bounces off the waved surface (a distorting mirror) and
+// lands h metres ABOVE the surface on an air-side receiver. Mirrors causticLanding with reflect()
+// in place of refract(); the reflected ray travels upward, so a wave-tilted normal that would send
+// it sideways or down just defocuses the landing (the max() guard stretches the path).
+public float2 causticLandingReflect(float2 xz, float t, float3 inc, float h, out float3 reflDir) {
+    float2 g = waterWaveGrad(xz, t);
+    float3 nw = normalize(float3(-g.x, 1.0, -g.y));
+    float3 rdw = reflect(inc, nw); // inc travels downward; the bounce returns skyward
+    reflDir = rdw;
+    return xz + rdw.xz * (h / max(rdw.y, 0.05));
+}
+
+// exitPos is where the receiver's shadow ray crossed the water surface; receiverNormal is the shading
+// normal of the NEE vertex receiving the light, used to refocus the Jacobian onto that surface's own
+// orientation (gated by waterDetailParams3.w; neutral for horizontal receivers).
+public float3 waterCaustic(float3 exitPos, float3 lightDir, float waterDist, float3 receiverNormal) {
     // Grazing light: the receiver-plane intersection degenerates and caustics vanish in reality anyway
     // (long slant paths absorb + the pattern smears out) — fade the effect to neutral 1.0.
     float fade = smoothstep(0.06, 0.18, lightDir.y);
@@ -284,31 +312,87 @@ public float3 waterCaustic(float3 exitPos, float3 lightDir, float waterDist) {
     float iorG = 1.333;                    // green channel baseline
     float iorB = 1.333 + 0.1 * dispersion;
 
+    // Refocus each channel's Jacobian from the horizontal reference plane onto the receiver's tangent
+    // plane, so slopes and walls get correctly shaped light bands.
+    bool tiltOn = worldPush.waterDetailParams3.w > 0.5;
+
     // ---- Evaluate three separate caustic Jacobians, one per wavelength
     // Red channel
-    float2 p0r = causticLanding(base, t, inc, h, iorR);
-    float2 pxr = causticLanding(base + float2(CAUSTIC_EPS, 0.0), t, inc, h, iorR);
-    float2 pzr = causticLanding(base + float2(0.0, CAUSTIC_EPS), t, inc, h, iorR);
+    float3 refrR;
+    float3 fdR;
+    float2 p0r = causticLanding(base, t, inc, h, iorR, refrR);
+    float2 pxr = causticLanding(base + float2(CAUSTIC_EPS, 0.0), t, inc, h, iorR, fdR);
+    float2 pzr = causticLanding(base + float2(0.0, CAUSTIC_EPS), t, inc, h, iorR, fdR);
     float detr = abs((pxr.x - p0r.x) * (pzr.y - p0r.y) - (pxr.y - p0r.y) * (pzr.x - p0r.x));
     float focusR = (CAUSTIC_EPS * CAUSTIC_EPS) / max(detr, 1.0e-5);
+    if (tiltOn) focusR *= causticTiltFactor(refrR, receiverNormal);
     float causticR = lerp(1.0, min(focusR, worldPush.waterDetailParams.w * 300.0), fade);
     // Green channel
-    float2 p0g = causticLanding(base, t, inc, h, iorG);
-    float2 pxg = causticLanding(base + float2(CAUSTIC_EPS, 0.0), t, inc, h, iorG);
-    float2 pzg = causticLanding(base + float2(0.0, CAUSTIC_EPS), t, inc, h, iorG);
+    float3 refrG;
+    float3 fdG;
+    float2 p0g = causticLanding(base, t, inc, h, iorG, refrG);
+    float2 pxg = causticLanding(base + float2(CAUSTIC_EPS, 0.0), t, inc, h, iorG, fdG);
+    float2 pzg = causticLanding(base + float2(0.0, CAUSTIC_EPS), t, inc, h, iorG, fdG);
     float detg = abs((pxg.x - p0g.x) * (pzg.y - p0g.y) - (pxg.y - p0g.y) * (pzg.x - p0g.x));
     float focusG = (CAUSTIC_EPS * CAUSTIC_EPS) / max(detg, 1.0e-5);
+    if (tiltOn) focusG *= causticTiltFactor(refrG, receiverNormal);
     float causticG = lerp(1.0, min(focusG, worldPush.waterDetailParams.w * 300.0), fade);
     // Blue channel
-    float2 p0b = causticLanding(base, t, inc, h, iorB);
-    float2 pxb = causticLanding(base + float2(CAUSTIC_EPS, 0.0), t, inc, h, iorB);
-    float2 pzb = causticLanding(base + float2(0.0, CAUSTIC_EPS), t, inc, h, iorB);
+    float3 refrB;
+    float3 fdB;
+    float2 p0b = causticLanding(base, t, inc, h, iorB, refrB);
+    float2 pxb = causticLanding(base + float2(CAUSTIC_EPS, 0.0), t, inc, h, iorB, fdB);
+    float2 pzb = causticLanding(base + float2(0.0, CAUSTIC_EPS), t, inc, h, iorB, fdB);
     float detb = abs((pxb.x - p0b.x) * (pzb.y - p0b.y) - (pxb.y - p0b.y) * (pzb.x - p0b.x));
     float focusB = (CAUSTIC_EPS * CAUSTIC_EPS) / max(detb, 1.0e-5);
+    if (tiltOn) focusB *= causticTiltFactor(refrB, receiverNormal);
     float causticB = lerp(1.0, min(focusB, worldPush.waterDetailParams.w * 300.0), fade);
 
     // Compose the RGB caustic and apply the color tint blend
     float3 chromatic = float3(causticR, causticG, causticB);
     float3 tinted = chromatic * lerp(float3(1.0, 1.0, 1.0), worldPush.waterColorTint.xyz, worldPush.waterColorTint.w);
     return tinted;
+}
+
+// Reflection caustic for receivers in air above the water: the waved surface acts as a distorting
+// mirror, so sunlight bounces off it and focuses onto cave ceilings, overhangs and hulls — the
+// shimmering bands seen on the underside of anything above water. The refraction caustic above can
+// never light a downward-facing surface (refracted sunlight always bends downward), so this is a
+// separate, purely reflective light path. surfacePos is the point where the receiver's mirror-sun
+// shadow ray crossed the water; waterDist is that crossing distance, so the receiver sits
+// waterDist·lightDir.y metres above the reflection point. Fresnel reflectance scales the term to
+// physical brightness (≈2% at a high sun, rising steeply toward sunset). No chromatic dispersion:
+// geometric reflection is wavelength-independent. Returns 0 when the sun is too grazing.
+public float3 waterCausticReflect(float3 surfacePos, float3 lightDir, float waterDist, float3 receiverNormal) {
+    float fade = smoothstep(0.06, 0.18, lightDir.y);
+    if (fade <= 0.0) return float3(0.0, 0.0, 0.0);
+    // Long throws stretch the finite-difference Jacobian into razor-thin stripes that alias and
+    // noise under accumulation — fade the term out with throw distance. Near-waterline bands
+    // (the common case) keep full strength.
+    float throwFade = 1.0 - smoothstep(8.0, 24.0, waterDist);
+    if (throwFade <= 0.0) return float3(0.0, 0.0, 0.0);
+    float h = max(waterDist * lightDir.y, 0.05); // receiver height above the reflection point
+    float t = worldPush.waterParams.w;
+    float3 inc = -lightDir;
+    float2 base = surfacePos.xz + worldPush.waterAnchor.xy; // world-stable wave domain
+    float F = fresnelDielectric(clamp(lightDir.y, 0.0, 1.0), 1.0, 1.333);
+
+    float3 reflDir;
+    float3 fd;
+    float2 p0 = causticLandingReflect(base, t, inc, h, reflDir);
+    float2 px = causticLandingReflect(base + float2(CAUSTIC_EPS, 0.0), t, inc, h, fd);
+    float2 pz = causticLandingReflect(base + float2(0.0, CAUSTIC_EPS), t, inc, h, fd);
+    float det = abs((px.x - p0.x) * (pz.y - p0.y) - (px.y - p0.y) * (pz.x - p0.x));
+    float focus = (CAUSTIC_EPS * CAUSTIC_EPS) / max(det, 1.0e-5);
+    // Refocus onto the receiver's own tangent plane (same gate as the refraction caustic).
+    if (worldPush.waterDetailParams3.w > 0.5) {
+        focus *= causticTiltFactor(reflDir, receiverNormal);
+    }
+    float caustic = F * throwFade * lerp(1.0, min(focus, worldPush.waterDetailParams.w * 300.0), fade);
+    // Slight water-colour cast: on real wave flanks part of the bouncing light grazes through the
+    // crest briefly before escaping, picking up a hint of the body's colour. Keeps the bands
+    // visually anchored to the water's tint (biome colour blended with the custom RGB mix).
+    float3 waterTint = lerp(worldPush.waterParams.xyz, worldPush.waterColorTint.xyz,
+                            worldPush.waterColorTint.w);
+    return caustic * lerp(float3(1.0, 1.0, 1.0), waterTint, 0.25);
 }

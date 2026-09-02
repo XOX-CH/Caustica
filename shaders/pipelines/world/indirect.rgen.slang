@@ -300,9 +300,10 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
             float3 vis = shadow.transmittance;
             // Underwater receiver whose shadow ray crossed a water surface: scale the direct light by
             // the wave-refraction caustic at the exit point. Focusing scales the incident irradiance,
-            // so it applies to the whole NEE term (diffuse + specular).
+            // so it applies to the whole NEE term (diffuse + specular). n refocuses the Jacobian onto
+            // this receiver's own orientation.
             if (medium.current.water && waterWaves && shadow.waterHitT > 0.0) {
-                vis *= waterCaustic(p + lightDir * shadow.waterHitT, lightDir, shadow.waterHitT);
+                vis *= waterCaustic(p + lightDir * shadow.waterHitT, lightDir, shadow.waterHitT, n);
             }
             // Water shadow tint: how much the water colour tints underwater shadows.
             // 0 = neutral shadow (no tint); 1 = fully tinted by the water colour.
@@ -325,6 +326,36 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
                 float3 F = fresnelSchlick(vdh, F0);
                 brdf += (D * G) * F / (4.0 * ndv * ndl); // Cook–Torrance specular
                 L += throughput * brdf * celestialLight.illuminance * ndl * vis;
+            }
+        }
+
+        // Reflection caustics onto air-side receivers: sunlight mirrored off the waved water
+        // surface onto cave ceilings, overhangs and hulls. Aim a shadow ray at the sun's mirror
+        // image (lightDir with y negated); its water crossing q pins the reflection point, and
+        // ACCEPT_FIRST_HIT traversal makes waterHitT > 0 a guarantee that the p→q segment is clear
+        // (an opaque hit would end the search before the water could record). The ray's own
+        // transmittance is deliberately ignored: whatever lies BELOW q (seabed, deeper water) is
+        // not on the sun→q→p path and must not cull the bounce. A second ray from q toward the
+        // real sun verifies q is actually sunlit, so enclosed caves only sparkle through openings.
+        // The dot(n, mirrorDir) gate restricts the extra rays to downward-facing surfaces — flat
+        // ground and upward normals skip the term entirely.
+        if (worldPush.waterDetailParams6.w > 0.5 && waterWaves
+                && !medium.current.water && lightDir.y > 0.06) {
+            float3 mirrorDir = float3(lightDir.x, -lightDir.y, lightDir.z);
+            float mirrorNdl = dot(n, mirrorDir);
+            if (mirrorNdl > 0.0) {
+                VisibilityResult mirror = visibility(p, mirrorDir, 10000.0);
+                // Beyond the throw-distance fade ceiling in waterCausticReflect the term is zero —
+                // skip the sun-verification ray and the caustic evaluation entirely.
+                if (mirror.waterHitT > 0.0 && mirror.waterHitT < 24.0) {
+                    float3 q = p + mirrorDir * mirror.waterHitT;
+                    VisibilityResult sunlit = visibility(q + lightDir * SURF_BIAS, lightDir, 10000.0);
+                    if (max(sunlit.transmittance.r, max(sunlit.transmittance.g, sunlit.transmittance.b)) > 0.0) {
+                        float3 caustic = waterCausticReflect(q, lightDir, mirror.waterHitT, n);
+                        L += throughput * diffAlb * INV_PI * celestialLight.illuminance
+                                * mirrorNdl * sunlit.transmittance * caustic;
+                    }
+                }
             }
         }
 
@@ -355,7 +386,7 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
                 // flicker with the same light bands as the floor around it.
                 if (medium.current.water && waterWaves && shadowBack.waterHitT > 0.0) {
                     visB *= waterCaustic(hitPos + lightDir * shadowBack.waterHitT,
-                                         lightDir, shadowBack.waterHitT);
+                                         lightDir, shadowBack.waterHitT, n);
                 }
                 if (medium.current.water) {
                     float shadowTint = worldPush.waterDetailParams2.y;

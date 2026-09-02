@@ -1,4 +1,4 @@
-﻿{
+{
 	"caustica.options.title": "Caustica-DLSS",
 	"key.caustica.openOptions": "Open Caustica-DLSS Options",
 	"caustica.options.reset": "Reset",
@@ -126,6 +126,10 @@
 	"caustica.options.rt.wavePreset.4": "涟漪 Ripple",
 	"caustica.options.rt.causticMax": "Caustic Brightness",
 	"caustica.options.rt.causticMax.tooltip": "Maximum brightness of underwater light caustics. Higher values produce brighter focus spots; 0 disables caustics.",
+	"caustica.options.rt.causticTilt": "Caustics on Slopes",
+	"caustica.options.rt.causticTilt.tooltip": "Focuses underwater caustics using each surface's own orientation, so sloped and vertical surfaces such as hills and walls receive correctly shaped light bands.",
+	"caustica.options.rt.causticReflect": "Reflected Caustics",
+	"caustica.options.rt.causticReflect.tooltip": "Sunlight bouncing off the waving water surface onto ceilings and overhangs above water, such as cave roofs and bridges, as shimmering light bands.",
 	"caustica.options.rt.waterShadowTint": "Shadow Tint",
 	"caustica.options.rt.waterShadowTint.tooltip": "How much the water colour tints underwater shadows. 0 = neutral shadows; 1 = fully tinted by water colour.",
 	"caustica.options.rt.waterOpacity": "Water Transparency",

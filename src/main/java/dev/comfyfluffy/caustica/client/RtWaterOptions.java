@@ -1,6 +1,7 @@
 package dev.comfyfluffy.caustica.client;
 
 import dev.comfyfluffy.caustica.CausticaConfig;
+import dev.comfyfluffy.caustica.CausticaConfig.BooleanSetting;
 import dev.comfyfluffy.caustica.CausticaConfig.FloatSetting;
 import java.util.Locale;
 import net.minecraft.client.OptionInstance;
@@ -28,6 +29,8 @@ public final class RtWaterOptions {
     public static ResetableOption[] waterOptions() {
         return new ResetableOption[] {
             causticBrightness(),
+            causticTilt(),
+            causticReflect(),
             waterDensity(),
             waterShadowTint(),
             waterOpacity(),
@@ -72,6 +75,32 @@ public final class RtWaterOptions {
     private static ResetableOption causticBrightness() {
         return tenthsSlider("caustica.options.rt.causticMax",
                 CausticaConfig.Rt.Water.CAUSTIC_BRIGHTNESS, 0, 50, 50);
+    }
+
+    /** On/off toggle with the factory default as its reset value. */
+    private static ResetableOption causticTilt() {
+        BooleanSetting setting = CausticaConfig.Rt.Water.CAUSTIC_TILT;
+        boolean factoryDefault = setting.defaultValue();
+        OptionInstance<Boolean> option = OptionInstance.createBoolean(
+                "caustica.options.rt.causticTilt",
+                OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.causticTilt.tooltip")),
+                factoryDefault,
+                setting::set);
+        option.set(setting.value());
+        return new ResetableOption(option, factoryDefault);
+    }
+
+    /** On/off toggle with the factory default as its reset value. */
+    private static ResetableOption causticReflect() {
+        BooleanSetting setting = CausticaConfig.Rt.Water.CAUSTIC_REFLECT;
+        boolean factoryDefault = setting.defaultValue();
+        OptionInstance<Boolean> option = OptionInstance.createBoolean(
+                "caustica.options.rt.causticReflect",
+                OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.causticReflect.tooltip")),
+                factoryDefault,
+                setting::set);
+        option.set(setting.value());
+        return new ResetableOption(option, factoryDefault);
     }
 
     private static ResetableOption waterDensity() {

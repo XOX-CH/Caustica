@@ -646,6 +646,8 @@ public final class CausticaConfig {
             public static final FloatSetting WAVE_SPEED = clampedFloat("caustica.rt.water.waveSpeed", "water.wave-speed", 0.8f, 0.0f, 2.0f);
             public static final IntSetting WAVE_PRESET = clampedInt("caustica.rt.water.wavePreset", "water.wave-preset", 0, 0, 4);
             public static final FloatSetting CAUSTIC_BRIGHTNESS = clampedFloat("caustica.rt.water.causticBrightness", "water.caustic-brightness", 5.0f, 0.0f, 5.0f);
+            public static final BooleanSetting CAUSTIC_TILT = bool("caustica.rt.water.causticTilt", "water.caustic-tilt", true);
+            public static final BooleanSetting CAUSTIC_REFLECT = bool("caustica.rt.water.causticReflect", "water.caustic-reflect", true);
             public static final FloatSetting WATER_DENSITY = clampedFloat("caustica.rt.water.waterDensity", "water.density", 0.10f, 0.0f, 0.50f);
             public static final FloatSetting WATER_OPACITY = clampedFloat("caustica.rt.water.waterOpacity", "water.water-opacity", 1.0f, 0.0f, 1.0f);
             public static final FloatSetting WATER_COLOR_R = clampedFloat("caustica.rt.water.colorR", "water.color-r", 0.25f, 0.0f, 1.0f);
