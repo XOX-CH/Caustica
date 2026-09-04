@@ -42,6 +42,7 @@ import dev.comfyfluffy.caustica.rt.RtGpuExecutor.TrackedGraphicsUse;
 import dev.comfyfluffy.caustica.rt.accel.RtAccel;
 import dev.comfyfluffy.caustica.rt.accel.RtBuffer;
 import dev.comfyfluffy.caustica.rt.pipeline.RtPipeline;
+import dev.comfyfluffy.caustica.rt.material.RtMaterialRegistry;
 
 import it.unimi.dsi.fastutil.floats.FloatArrayList;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
@@ -196,6 +197,14 @@ public final class RtEntities {
     private IdentityHashMap<Particle, ParticlePrev> particlePrev = new IdentityHashMap<>();
     private IdentityHashMap<Particle, ParticlePrev> particleCur = new IdentityHashMap<>();
     private final float[] particleCenterScratch = new float[3];
+
+    // Rain particle tracking: persistent positions across frames for falling animation.
+    // Each particle is (x, y, z) in rebase-space. Rebuilt when rain level changes.
+    // All rain parameters are read from CausticaConfig.Rt.Weather at runtime — see captureRain().
+    private final ArrayList<float[]> rainPositions = new ArrayList<>();
+    private final ArrayList<float[]> rainPrevPositions = new ArrayList<>();
+    private int rainParticleCount;
+    private float lastRainLevel = -1f;
 
     /** Previous frame's particle center (rebase-space) + that frame's rebase origin, for the MV diff. */
     private static final class ParticlePrev {
@@ -1089,45 +1098,123 @@ public final class RtEntities {
      * Generate procedural rain particles when the weather is rainy. The vanilla rain is rendered as part of
      * the frame graph in {@link net.minecraft.client.renderer.LevelRenderer#render}, which is skipped when
      * path tracing is active (see {@link dev.comfyfluffy.caustica.mixin.LevelRendererMixin#caustica$skipFrameGraphExecute}).
-     * Instead, we generate thin vertical quads as RT particles with {@link #PARTICLE_MASK} (primary-ray only),
-     * using the solid-white bindless slot so the rain appears as semi-transparent white streaks.
+     * Instead, we generate thin vertical quads as RT particles with persistent positions across frames:
+     * particles fall downward each frame, creating a natural rain animation with proper motion vectors
+     * for DLSS FG. The rain material uses MODEL_RAIN (dielectric with Mie forward scattering).
      */
     private void captureRain(RtContext ctx, FrameBuild build, Minecraft mc, float partial,
                               int rbx, int rby, int rbz, float rainLevel) {
-        if (rainLevel <= 0f || build.full() || !particlesEnabled()) {
+        if (rainLevel <= 0f || build.full() || !particlesEnabled()
+                || !CausticaConfig.Rt.Weather.RAIN_ENABLED.value()) {
+            rainPositions.clear();
+            rainPrevPositions.clear();
+            rainParticleCount = 0;
+            lastRainLevel = -1f;
             return;
         }
-        int rainCount = Math.round(rainLevel * 100f);
-        if (rainCount <= 0) {
+        float rainMaxParticles = CausticaConfig.Rt.Weather.RAIN_MAX_PARTICLES.value();
+        float rainHalfRange = CausticaConfig.Rt.Weather.RAIN_HALF_RANGE.value();
+        float rainHeightAbove = CausticaConfig.Rt.Weather.RAIN_HEIGHT_ABOVE.value();
+        float rainHeightBelow = CausticaConfig.Rt.Weather.RAIN_HEIGHT_BELOW.value();
+        float rainAlpha = CausticaConfig.Rt.Weather.RAIN_PARTICLE_ALPHA.value();
+        float rainFallSpeed = CausticaConfig.Rt.Weather.RAIN_FALL_SPEED.value();
+        float rainWindStrength = CausticaConfig.Rt.Weather.RAIN_WIND_STRENGTH.value();
+        float rainStreakWidth = CausticaConfig.Rt.Weather.RAIN_STREAK_WIDTH.value();
+        float rainStreakHeight = CausticaConfig.Rt.Weather.RAIN_STREAK_HEIGHT.value();
+
+        int targetCount = Math.round(rainLevel * rainMaxParticles);
+        if (targetCount <= 0) {
             return;
         }
-        capture.currentTexSlot = RtEntityTextures.INSTANCE.whiteSlot();
-        capture.currentAlphaBucket = RtAccel.ENTITY_BUCKET_ANY_HIT;
+
+        // Re-initialize positions when rain level changes significantly.
+        if (Math.abs(rainLevel - lastRainLevel) > 0.05f || rainParticleCount != targetCount) {
+            rainPositions.clear();
+            rainPrevPositions.clear();
+            Random initRand = new Random(42L); // stable seed for initialization
+            Vec3 camPos = mc.gameRenderer.mainCamera().position();
+            for (int i = 0; i < targetCount; i++) {
+                float x = (initRand.nextFloat() - 0.5f) * rainHalfRange * 2f + (float) (camPos.x - rbx);
+                float y = initRand.nextFloat() * (rainHeightAbove + rainHeightBelow)
+                        + (float) (camPos.y - rby) - rainHeightBelow;
+                float z = (initRand.nextFloat() - 0.5f) * rainHalfRange * 2f + (float) (camPos.z - rbz);
+                rainPositions.add(new float[]{x, y, z});
+                rainPrevPositions.add(new float[]{x, y, z}); // initial prev = current (no MV on first frame)
+            }
+            rainParticleCount = targetCount;
+            lastRainLevel = rainLevel;
+        }
+
+        // Get the rain material ID from the registry.
+        int rainMatId = RtMaterialRegistry.INSTANCE.requireSnapshot().rainId();
+
+        // Delta time: use the frame partial tick. Fall speed is in blocks/second.
+        float dt = partial; // MC's partial tick is in seconds (0..1 within a tick)
+        // Horizontal wind displacement (gentle breeze), scaled by wind strength.
+        float windDx = (float) (Math.sin(mc.level.getGameTime() * 0.05) * 0.3 * dt * rainWindStrength);
+        float windDz = (float) (Math.cos(mc.level.getGameTime() * 0.07) * 0.2 * dt * rainWindStrength);
+
+        float totalHeight = rainHeightAbove + rainHeightBelow;
+        float minY = -(rainHeightBelow); // relative to camera
+        float maxY = rainHeightAbove;
+
         Vec3 camPos = mc.gameRenderer.mainCamera().position();
         float ox = (float) (camPos.x - rbx);
         float oy = (float) (camPos.y - rby);
         float oz = (float) (camPos.z - rbz);
-        // Rain volume: 32 blocks horizontally, 16 blocks vertically above the camera.
-        float halfRange = 32f;
-        float height = 16f;
-        int color = 0x40FFFFFF; // semi-transparent white (25% opacity)
-        Random random = new Random();
-        for (int i = 0; i < rainCount; i++) {
-            float x = (random.nextFloat() - 0.5f) * halfRange * 2f + ox;
-            float y = random.nextFloat() * height + oy;
-            float z = (random.nextFloat() - 0.5f) * halfRange * 2f + oz;
-            float hw = 0.25f; // half-width
-            float ht = 4f;    // height
-            // Thin vertical quad: bottom-left, bottom-right, top-right, top-left.
-            capture.addVertex(x - hw, y, z, color, 0f, 0f, 0, 0xF000F0, 0f, 0f, 0f);
-            capture.addVertex(x + hw, y, z, color, 1f, 0f, 0, 0xF000F0, 0f, 0f, 0f);
-            capture.addVertex(x + hw, y + ht, z, color, 1f, 1f, 0, 0xF000F0, 0f, 0f, 0f);
-            capture.addVertex(x - hw, y + ht, z, color, 0f, 1f, 0, 0xF000F0, 0f, 0f, 0f);
-            // Zero motion vector (4 floats per vertex, 4 vertices = 16 floats).
+
+        capture.currentTexSlot = RtEntityTextures.INSTANCE.whiteSlot();
+        capture.currentAlphaBucket = RtAccel.ENTITY_BUCKET_ANY_HIT;
+        capture.currentMaterialId = rainMatId;
+
+        float fallDistance = rainFallSpeed * dt;
+        int color = (((int) (rainAlpha * 255f)) << 24) | 0xFFFFFF; // semi-transparent white
+        float hw = rainStreakWidth; // half-width of rain streak
+        float ht = rainStreakHeight; // height of rain streak
+
+        for (int i = 0; i < rainParticleCount; i++) {
+            float[] pos = rainPositions.get(i);
+            float[] prevPos = rainPrevPositions.get(i);
+
+            // Save current position as previous for next frame.
+            prevPos[0] = pos[0];
+            prevPos[1] = pos[1];
+            prevPos[2] = pos[2];
+
+            // Update position: fall downward + wind.
+            pos[1] -= fallDistance;
+            pos[0] += windDx;
+            pos[2] += windDz;
+
+            // Respawn at top when fallen below the volume.
+            if (pos[1] < oy + minY) {
+                pos[0] = (float) (Math.random() - 0.5) * rainHalfRange * 2f + ox;
+                pos[1] = oy + maxY;
+                pos[2] = (float) (Math.random() - 0.5) * rainHalfRange * 2f + oz;
+                // Respawned: no motion vector (prev = current).
+                prevPos[0] = pos[0];
+                prevPos[1] = pos[1];
+                prevPos[2] = pos[2];
+            }
+
+            // Rebase tracking: if the rebuild origin changed, adjust prev positions.
+            // (not needed here since both prev and current are in the same rebase space)
+
+            // Motion vector displacement: current - previous (in world-rebase space).
+            float dx = pos[0] - prevPos[0];
+            float dy = pos[1] - prevPos[1];
+            float dz = pos[2] - prevPos[2];
+
+            // Render thin vertical quad at current position.
+            capture.addVertex(pos[0] - hw, pos[1], pos[2], color, 0f, 0f, 0, 0xF000F0, 0f, 0f, 0f);
+            capture.addVertex(pos[0] + hw, pos[1], pos[2], color, 1f, 0f, 0, 0xF000F0, 0f, 0f, 0f);
+            capture.addVertex(pos[0] + hw, pos[1] + ht, pos[2], color, 1f, 1f, 0, 0xF000F0, 0f, 0f, 0f);
+            capture.addVertex(pos[0] - hw, pos[1] + ht, pos[2], color, 0f, 1f, 0, 0xF000F0, 0f, 0f, 0f);
+            // Motion vector (4 floats per vertex, 4 vertices = 16 floats).
             for (int v = 0; v < 4; v++) {
-                particleDisp.add(0f);
-                particleDisp.add(0f);
-                particleDisp.add(0f);
+                particleDisp.add(dx);
+                particleDisp.add(dy);
+                particleDisp.add(dz);
                 particleDisp.add(0f);
             }
             build.logicalCount++;

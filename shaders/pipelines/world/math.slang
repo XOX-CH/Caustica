@@ -45,6 +45,27 @@ public float hg(float cosT, float g) {
     return (1.0 - g2) / (4.0 * PI * pow(max(0.0, 1.0 + g2 - 2.0 * g * cosT), 1.5));
 }
 
+// Sample a direction from the Henyey-Greenstein phase function, given the mean direction `dir`
+// and anisotropy `g` (g > 0 = forward scattering). Returns a unit vector perturbed around `dir`
+// by the HG distribution. Used for rain droplet Mie forward scattering (g ≈ 0.9).
+public float3 sampleHgDir(float3 dir, float g, inout uint seed) {
+    float cosT;
+    if (abs(g) < 1.0e-6) {
+        cosT = 1.0 - 2.0 * rndf(seed);
+    } else {
+        float g2 = g * g;
+        float r = rndf(seed);
+        cosT = (1.0 + g2 - ((1.0 - g2) / (1.0 - g + 2.0 * g * r)) * ((1.0 - g2) / (1.0 - g + 2.0 * g * r))) / (2.0 * g);
+    }
+    float sinT = sqrt(max(1.0e-8, 1.0 - cosT * cosT));
+    float phi = rndf(seed) * 2.0 * PI;
+    // Build an orthonormal frame around dir.
+    float3 u = abs(dir.x) > 0.1 ? float3(0.0, 1.0, 0.0) : float3(1.0, 0.0, 0.0);
+    float3 tangent = normalize(cross(u, dir));
+    float3 bitangent = cross(dir, tangent);
+    return normalize(cosT * dir + sinT * (cos(phi) * tangent + sin(phi) * bitangent));
+}
+
 // NVIDIA RR guide-buffer helper: integrated/view-dependent specular reflectivity, not raw F0.
 // alpha is GGX alpha (== the linear roughness materials store), NoV is the first-hit view cosine.
 public float3 rrSpecularAlbedo(float3 specularColor, float alpha, float NoV) {

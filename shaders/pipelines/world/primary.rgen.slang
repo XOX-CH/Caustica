@@ -63,7 +63,7 @@ public PathSegment tracePrimary(PathSegment seg,
         float3 n = payloadNormal();
         float3 hitPos = ro + rd * payload.hitT;
         uint material = payloadMaterial();
-        if (material != MATERIAL_WATER && material != MATERIAL_DIELECTRIC) {
+        if (material != MATERIAL_WATER && material != MATERIAL_DIELECTRIC && material != MATERIAL_RAIN) {
             float rough = material == MATERIAL_PARTICLE
                     ? 1.0 : clamp(payloadRoughness(), 0.0, 1.0);
             bool exactSpecular = material == MATERIAL_OPAQUE && isDeltaAlpha(rough);
@@ -105,6 +105,7 @@ public PathSegment tracePrimary(PathSegment seg,
                            RAY_CONE_MIN_WIDTH);
 
         bool isWater = material == MATERIAL_WATER;
+        bool isRain = material == MATERIAL_RAIN;
         bool entering = payloadDielectricEntering();
         float3 geometricNormal = n;
         float3 previousNormal = n;
@@ -127,13 +128,29 @@ public PathSegment tracePrimary(PathSegment seg,
         }
 
         float transmission = clamp(payloadTransmission(), 0.0, 1.0);
-        Medium entered = makeDielectricMedium(isWater, max(payloadIor(), 1.0),
-                                              payloadAlbedo(), transmission);
+        Medium entered;
+        if (isRain) {
+            // Rain droplets: thin surface, no volume. Correct IOR for Fresnel, but zero extinction
+            // and no water flag so the transmitted ray is not attenuated by a volume it doesn't
+            // travel through. The Mie scattering perturbation on the transmitted direction creates
+            // the forward-scattering glow around light sources.
+            entered = Medium(max(payloadIor(), 1.0), float3(0.0, 0.0, 0.0), false);
+        } else {
+            entered = makeDielectricMedium(isWater, max(payloadIor(), 1.0),
+                                          payloadAlbedo(), transmission);
+        }
         float etaI = medium.current.ior;
         float etaT = entering ? entered.ior : medium.outer.ior;
         float F = fresnelDielectric(clamp(dot(-rd, n), 0.0, 1.0), etaI, etaT);
         float3 transmittedDir = refract(rd, n, etaI / etaT);
-        float transmitBias = isWater ? SURF_BIAS : INSET_TRANSMIT_BIAS;
+        // Rain droplets: perturb the transmitted direction with Mie forward scattering so light
+        // passing through the droplet spreads in a forward lobe, creating the bright glow around
+        // light sources. The perturbation is applied to the transmission direction, not the
+        // reflection direction, so specular highlights stay sharp.
+        if (isRain && dot(transmittedDir, transmittedDir) > 0.0) {
+            transmittedDir = sampleHgDir(normalize(transmittedDir), worldPush.skyLook4.z, seed);
+        }
+        float transmitBias = (isWater || isRain) ? SURF_BIAS : INSET_TRANSMIT_BIAS;
 
         if (bounce == 0) {
             gv_normal = n;
@@ -142,9 +159,9 @@ public PathSegment tracePrimary(PathSegment seg,
             gv_emissive = false;
             gv_hitCamRel = hitPos - worldPush.camOffset;
             gv_motionUseRefracted = false;
-            gv_motionObjDisp = isWater ? float3(0.0, 0.0, 0.0) : payload.motionPrev;
+            gv_motionObjDisp = (isWater && !isRain) ? float3(0.0, 0.0, 0.0) : payload.motionPrev;
             gv_spec = makeSpecSurface(gv_hitCamRel, n, previousNormal, geometricNormal,
-                                      isWater ? float3(0.0, 0.0, 0.0) : float3(payload.motionPrev),
+                                      (isWater && !isRain) ? float3(0.0, 0.0, 0.0) : float3(payload.motionPrev),
                                       gv_rough, float3(F, F, F));
             if (dot(transmittedDir, transmittedDir) > 0.0) {
                 MediumStack guideMedium = medium;
@@ -155,7 +172,7 @@ public PathSegment tracePrimary(PathSegment seg,
                 }
                 resolveTransmissionGuide(hitPos, transmittedDir, geometricNormal,
                         guideMedium, transmitBias, rayConeWidth, rayConeSpread,
-                        !isWater && entering
+                        !isWater && !isRain && entering
                                 ? payloadAlbedo() : float3(1.0, 1.0, 1.0));
             }
         }

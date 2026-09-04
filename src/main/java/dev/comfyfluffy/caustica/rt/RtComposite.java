@@ -1,5 +1,6 @@
 package dev.comfyfluffy.caustica.rt;
 
+import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.GpuTexture;
@@ -33,17 +34,23 @@ import net.minecraft.world.level.MoonPhase;
 import net.minecraft.world.level.material.FluidState;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
+import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
+import org.lwjgl.util.vma.Vma;
+import org.lwjgl.util.vma.VmaAllocationCreateInfo;
 import org.lwjgl.vulkan.KHRSynchronization2;
 import org.lwjgl.vulkan.VK10;
 import org.lwjgl.vulkan.VkBufferImageCopy;
 import org.lwjgl.vulkan.VkCommandBuffer;
 import org.lwjgl.vulkan.VkDependencyInfo;
+import org.lwjgl.vulkan.VkDevice;
 import org.lwjgl.vulkan.VkImageBlit;
 import org.lwjgl.vulkan.VkImageCopy;
+import org.lwjgl.vulkan.VkImageCreateInfo;
 import org.lwjgl.vulkan.VkImageMemoryBarrier;
 import org.lwjgl.vulkan.VkImageMemoryBarrier2;
+import org.lwjgl.vulkan.VkImageViewCreateInfo;
 import org.lwjgl.vulkan.VkMemoryBarrier;
 import org.lwjgl.vulkan.VkMemoryBarrier2;
 import org.lwjgl.vulkan.VkSamplerCreateInfo;
@@ -1410,6 +1417,13 @@ public final class RtComposite {
         float toRadians = (float) (Math.PI / 180.0);
         float sunAngle = probe.getValue(EnvironmentAttributes.SUN_ANGLE, partial) * toRadians;
         float moonAngle = probe.getValue(EnvironmentAttributes.MOON_ANGLE, partial) * toRadians;
+        // Sun angle override: replace Minecraft's day/night cycle with a fixed user-defined angle.
+        // User slider: 0° = sunrise (east), 90° = noon (south, highest), 180° = sunset (west),
+        // 270° = midnight (below horizon). The moon is kept 180° opposite the sun.
+        if (CausticaConfig.Rt.Lighting.SUN_ANGLE_OVERRIDE.value()) {
+            sunAngle = (CausticaConfig.Rt.Lighting.SUN_ANGLE_DEGREES.value() - 90.0f) * toRadians;
+            moonAngle = sunAngle + (float) Math.PI;
+        }
         // Stars use Minecraft's own celestial rotation and brightness (the values vanilla's SkyRenderer
         // uses), so the field wheels about the celestial pole tied to world time and fades in and out at
         // dusk/dawn exactly like vanilla's.
@@ -1435,9 +1449,11 @@ public final class RtComposite {
                         CausticaConfig.Rt.Composite.ROUGHNESS_SCALE.value(),
                         CausticaConfig.Rt.Composite.REFLECTION_SCALE.value()),
                 // skyLook4: x = sun colour temperature (0.1=cool, 0.5=physical sky, 1=warm),
-                // y = GI indirect strength (×10 internal boost; 0.5=DLSS default, <0.5 reduce, >0.5 boost), z,w reserved.
+                // y = GI indirect strength (×10 internal boost; 0.5=DLSS default, <0.5 reduce, >0.5 boost),
+                // z = rain Mie-G forward scattering anisotropy.
                 new Float4(CausticaConfig.Rt.Lighting.SUN_COLOR_TEMP.value(),
-                        CausticaConfig.Rt.Composite.GI_STRENGTH.value() * 10.0f, 0.0f, 0.0f),
+                        CausticaConfig.Rt.Composite.GI_STRENGTH.value() * 10.0f,
+                        CausticaConfig.Rt.Weather.RAIN_MIE_G.value(), 0.0f),
                 uv.sun(),
                 uv.moon());
     }

@@ -60,7 +60,7 @@ public final class CausticaConfig {
             Rt.Terrain.ASYNC_DISPATCH_PER_PASS, Rt.Omm.ENABLED,
             Rt.Entities.ENABLED, Rt.Entities.GLOW_ENABLED, Rt.EntityTextures.MAX_TEXTURES, Rt.DlssRr.ENABLED, Rt.Fg.ENABLED,
             Rt.Reflex.ENABLED, Rt.Bloom.STRENGTH, Rt.Exposure.MODE, Rt.Tonemap.GAMMA, Rt.Tonemap.HUE_SHIFT,
-            Rt.Tonemap.SATURATION, Rt.Lighting.SUN_COLOR_TEMP, Rt.FrameStats.ENABLED,
+            Rt.Tonemap.SATURATION, Rt.Lighting.SUN_COLOR_TEMP, Rt.Lighting.SUN_ANGLE_OVERRIDE, Rt.Lighting.SUN_ANGLE_DEGREES, Rt.FrameStats.ENABLED,
             Rt.Screenshots.EXR_ENABLED, Rt.Hdr.ENABLED, Ngx.PATH,
             CausticaConfig.Rt.Water.WAVE_STRENGTH,
             CausticaConfig.Rt.Water.WAVE_HEIGHT,
@@ -99,6 +99,17 @@ public final class CausticaConfig {
             CausticaConfig.Rt.Water.PRESET_12,
             CausticaConfig.Rt.Water.PRESET_13,
             CausticaConfig.Rt.Water.PRESET_14,
+            CausticaConfig.Rt.Weather.RAIN_ENABLED,
+            CausticaConfig.Rt.Weather.RAIN_MAX_PARTICLES,
+            CausticaConfig.Rt.Weather.RAIN_PARTICLE_ALPHA,
+            CausticaConfig.Rt.Weather.RAIN_FALL_SPEED,
+            CausticaConfig.Rt.Weather.RAIN_HALF_RANGE,
+            CausticaConfig.Rt.Weather.RAIN_HEIGHT_ABOVE,
+            CausticaConfig.Rt.Weather.RAIN_HEIGHT_BELOW,
+            CausticaConfig.Rt.Weather.RAIN_MIE_G,
+            CausticaConfig.Rt.Weather.RAIN_WIND_STRENGTH,
+            CausticaConfig.Rt.Weather.RAIN_STREAK_WIDTH,
+            CausticaConfig.Rt.Weather.RAIN_STREAK_HEIGHT,
         };
     }
 
@@ -656,6 +667,16 @@ public final class CausticaConfig {
             public static final FloatSetting SUN_COLOR_TEMP =
                     clampedFloat("caustica.rt.lighting.sunColorTemp", "lighting.sun-color-temp", 0.5f, 0.1f, 1.0f);
 
+            // Sun angle override: when enabled, the sun position is fixed to the user-defined angle
+            // instead of following Minecraft's day/night cycle.
+            public static final BooleanSetting SUN_ANGLE_OVERRIDE =
+                    bool("caustica.rt.lighting.sunAngleOverride", "lighting.sun-angle-override", false);
+
+            // Sun angle in degrees (0-360): 0 = sunrise (east), 90 = noon (south, highest),
+            // 180 = sunset (west), 270 = midnight (below horizon).
+            public static final FloatSetting SUN_ANGLE_DEGREES =
+                    clampedFloat("caustica.rt.lighting.sunAngleDegrees", "lighting.sun-angle-degrees", 90.0f, 0.0f, 360.0f);
+
             private Lighting() {
             }
         }
@@ -767,6 +788,34 @@ public final class CausticaConfig {
 
             private EntityTextures() {
             }
+        }
+
+        /** Weather and rain particle settings. */
+        public static final class Weather {
+            public static final BooleanSetting RAIN_ENABLED =
+                    bool("caustica.rt.weather.rain", "weather.rain.enabled", true);
+            public static final IntSetting RAIN_MAX_PARTICLES =
+                    clampedInt("caustica.rt.weather.rainMaxParticles", "weather.rain.max-particles", 800, 0, 2000);
+            public static final FloatSetting RAIN_PARTICLE_ALPHA =
+                    clampedFloat("caustica.rt.weather.rainAlpha", "weather.rain.alpha", 0.35f, 0.0f, 1.0f);
+            public static final FloatSetting RAIN_FALL_SPEED =
+                    clampedFloat("caustica.rt.weather.rainFallSpeed", "weather.rain.fall-speed", 28.0f, 0.0f, 100.0f);
+            public static final FloatSetting RAIN_HALF_RANGE =
+                    clampedFloat("caustica.rt.weather.rainHalfRange", "weather.rain.half-range", 32.0f, 1.0f, 128.0f);
+            public static final FloatSetting RAIN_HEIGHT_ABOVE =
+                    clampedFloat("caustica.rt.weather.rainHeightAbove", "weather.rain.height-above", 24.0f, 1.0f, 64.0f);
+            public static final FloatSetting RAIN_HEIGHT_BELOW =
+                    clampedFloat("caustica.rt.weather.rainHeightBelow", "weather.rain.height-below", 4.0f, 0.0f, 32.0f);
+            public static final FloatSetting RAIN_MIE_G =
+                    clampedFloat("caustica.rt.weather.rainMieG", "weather.rain.mie-g", 0.9f, 0.0f, 0.99f);
+            public static final FloatSetting RAIN_WIND_STRENGTH =
+                    clampedFloat("caustica.rt.weather.rainWindStrength", "weather.rain.wind-strength", 1.0f, 0.0f, 5.0f);
+            public static final FloatSetting RAIN_STREAK_WIDTH =
+                    clampedFloat("caustica.rt.weather.rainStreakWidth", "weather.rain.streak-width", 0.08f, 0.01f, 0.5f);
+            public static final FloatSetting RAIN_STREAK_HEIGHT =
+                    clampedFloat("caustica.rt.weather.rainStreakHeight", "weather.rain.streak-height", 5.0f, 0.5f, 20.0f);
+
+            private Weather() {}
         }
 
         public static final class Overlay {

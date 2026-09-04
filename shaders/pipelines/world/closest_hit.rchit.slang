@@ -220,12 +220,17 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
 
     // Particle billboard: same geom-table/UV/bindless-atlas path as entities. Albedo is atlas texel *
     // per-particle colour; raygen treats material 2 as a primary-visible diffuse receiver with no
-    // emission or specular response. Reached only by the primary ray (instance mask 0x02). Cutout: rahit.
+    // emission or specular response. Rain particles (material 4) use a dielectric BSDF with IOR=1.333
+    // and Mie forward-scattering transmission, giving them specular highlights and a forward glow.
+    // Reached only by the primary ray (instance mask 0x02). Cutout: rahit.
     if ((InstanceID() & PARTICLE_BIT) != 0u) {
         uint idx = InstanceID() & IDX_MASK;
         EntityGeom g = ConstPtr<EntityGeom>(pc.entityTableAddr)[idx];
         uint pid = PrimitiveIndex() + g.triBase[GeometryIndex()];
         Prim pr = ConstPtr<Prim>(g.primAddr)[pid];
+        // Check if this is a rain particle by examining the material header.
+        MaterialHeader particleHeader = ConstPtr<MaterialHeader>(pc.materialTableAddr)[pr.materialId];
+        bool isRain = particleHeader.model == MATERIAL_RAIN;
         ConstPtr<uint> ib = ConstPtr<uint>(g.idxAddr);
         ConstPtr<float2> uvb = ConstPtr<float2>(g.uvAddr);
         uint p0 = ib[3u * pid + 0u];
@@ -259,9 +264,18 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
         } else {
             payload.motionPrev = half3(g.rigidDisp.xyz);
         }
-        payload.f0 = half3(0.0h, 0.0h, 0.0h);
-        payloadSetPacked(payload, MATERIAL_PARTICLE, 1.0, 0.0, 0.0, 0.0,
-                1.0, 0.0, EMISSION_SOURCE_NONE);
+        if (isRain) {
+            // Rain: dielectric BSDF with IOR=1.333 (water), zero roughness, full transmission.
+            // F0 comes from the water Fresnel at normal incidence: ((1-1.333)/(1+1.333))^2 ≈ 0.02.
+            float rainF0 = 0.02;
+            payload.f0 = half3(0.02h, 0.02h, 0.02h);
+            payloadSetPacked(payload, MATERIAL_RAIN, 0.0064, 0.0, 0.0, 0.0,
+                    particleHeader.params.z, particleHeader.params.w, EMISSION_SOURCE_NONE);
+        } else {
+            payload.f0 = half3(0.0h, 0.0h, 0.0h);
+            payloadSetPacked(payload, MATERIAL_PARTICLE, 1.0, 0.0, 0.0, 0.0,
+                    1.0, 0.0, EMISSION_SOURCE_NONE);
+        }
         return;
     }
     // Dynamic entities: instances with this custom-index flag bit carry real captured ModelPart

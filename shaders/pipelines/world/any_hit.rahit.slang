@@ -80,6 +80,24 @@ void main(inout Payload payload, in BuiltInTriangleIntersectionAttributes attr) 
             IgnoreHit();
         }
 
+        // Rain particles: use per-primitive alpha from the vertex colour (stored in epr.flags as float bits)
+        // for stochastic semi-transparency. This gives the rain a see-through appearance that accumulates
+        // correctly over multiple frames.
+        if (instanceKind == PARTICLE_BIT) {
+            materialHeader = ConstPtr<MaterialHeader>(pc.materialTableAddr)[epr.materialId];
+            if (materialHeader.model == MATERIAL_RAIN) {
+                float rainAlpha = asfloat(epr.flags);
+                if (rainAlpha < 1.0) {
+                    uint rainSalt = pid * 2654435761u
+                            ^ (InstanceID() & IDX_MASK) * 2246822519u
+                            ^ asuint(RayTCurrent()) * 3266489917u;
+                    if (alphaDitherThreshold(rainSalt) >= clamp(rainAlpha, 0.0, 1.0)) {
+                        IgnoreHit();
+                    }
+                }
+            }
+        }
+
         // Radiance rays accept the surface and continue to closest-hit. Shadow rays use the same material
         // model here so entity dielectrics transmit instead of becoming opaque shadow blockers.
         bool shadowRay = (RayFlags() & RAY_FLAG_SKIP_CLOSEST_HIT_SHADER) != 0u;

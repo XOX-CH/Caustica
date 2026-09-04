@@ -72,7 +72,7 @@ public struct WorldPush {
     public float4   skyLook2;
     public float4   skyLook3;         // x ground albedo, y horizon soften, z roughness scale, w reflection scale
     // x sun color temperature (0=cool, 0.5=physical sky, 1=warm), y gi indirect strength,
-    // z w reserved for future use.
+    // z rain mie-g (forward scattering anisotropy), w reserved for future use.
     public float4   skyLook4;
     public float4   sunUv;            // vanilla sun sprite atlas rect (u0,v0,u1,v1)
     public float4   moonUv;           // vanilla current-moon-phase sprite atlas rect
@@ -203,7 +203,7 @@ public static const uint EMISSION_SOURCE_UNIFORM = 1u;
 public static const uint EMISSION_SOURCE_HEURISTIC = 2u;
 public static const uint EMISSION_SOURCE_LAB_PBR = 3u;
 
-public static const uint PAYLOAD_MATERIAL_MASK = 3u;
+public static const uint PAYLOAD_MATERIAL_MASK = 7u;
 public static const uint MATERIAL_OPAQUE = 0u;
 // Both dielectrics are volumes: they refract and push a participating medium. They stay distinct ids
 // because water owns behaviour nothing else has — an animated wave surface, the caustic term, biome-tint
@@ -213,6 +213,15 @@ public static const uint MATERIAL_OPAQUE = 0u;
 public static const uint MATERIAL_WATER = 1u;
 public static const uint MATERIAL_PARTICLE = 2u;
 public static const uint MATERIAL_DIELECTRIC = 3u;
+// Rain droplets: thin dielectric surfaces with forward-scattering Mie transmission. Used by procedural
+// rain particles (captureRain in RtEntities). The same dielectric Fresnel split applies, but the
+// transmitted direction is perturbed by a Mie phase function (g ≈ 0.9) for the forward-scattering glow.
+// Rain particles are primary-ray-only (PARTICLE_MASK) and use stochastic alpha for semi-transparency.
+public static const uint MATERIAL_RAIN = 4u;
+// Mie forward-scattering anisotropy for rain droplets. Strongly forward-peaked (g ≈ 0.9) so light
+// passing through a rain droplet scatters mostly in the forward direction, creating the bright glow
+// around light sources that makes rain visible at night.
+public static const float RAIN_MIE_G = 0.9;
 
 // Entity per-triangle record (48 B). The final lane mirrors TerrainPrim's integer material metadata.
 public struct Prim {

@@ -42,6 +42,7 @@ public final class RtMaterialRegistry {
     public static final int MODEL_OPAQUE = 0;
     public static final int MODEL_WATER = 1;
     public static final int MODEL_DIELECTRIC = 3;
+    public static final int MODEL_RAIN = 4;
     public static final int FEATURE_SPEC = 1;
     public static final int FEATURE_NORMAL = 2;
     public static final int FEATURE_HEURISTIC_EMISSION = 4;
@@ -167,6 +168,9 @@ public final class RtMaterialRegistry {
         int nextEntityFallbackId = headers.size();
         add(headers, descriptions, grids, compileEntityDesc(0, true, RtMaterialDesc.EmissionSummary.NONE),
                 transparentWhiteAverage(), fallbackEntry, null);
+        int rainId = headers.size();
+        add(headers, descriptions, grids, compileDesc(MODEL_RAIN, 0, RtMaterials.Profile.WATER,
+                false, false, RtMaterialDesc.EmissionSummary.NONE), transparentWhiteAverage(), fallbackEntry, null);
 
         IdentityHashMap<TextureAtlasSprite, int[]> ids = new IdentityHashMap<>();
         List<MutableCompiledOverride> compiledOverrides = new ArrayList<>();
@@ -293,7 +297,7 @@ public final class RtMaterialRegistry {
                         compiled.rule.source(), compiled.rule.sprite());
             }
         }
-        Snapshot next = new Snapshot(epoch, Collections.unmodifiableMap(ids), fallbackVariants, waterId, lavaId,
+        Snapshot next = new Snapshot(epoch, Collections.unmodifiableMap(ids), fallbackVariants, waterId, lavaId, rainId,
                 List.copyOf(descriptions), Collections.unmodifiableList(new ArrayList<>(grids)), frozenOverrides);
         entityTextureIds = Collections.unmodifiableMap(nextEntityTextureIds);
         entityTemplates = Collections.unmodifiableMap(nextEntityTemplates);
@@ -463,9 +467,10 @@ public final class RtMaterialRegistry {
         float ior = switch (model) {
             case MODEL_WATER -> RtDielectrics.WATER_IOR;
             case MODEL_DIELECTRIC -> dielectricIor;
+            case MODEL_RAIN -> RtDielectrics.WATER_IOR;
             default -> 1.0f;
         };
-        float transmission = model == MODEL_WATER || model == MODEL_DIELECTRIC ? 1.0f : 0.0f;
+        float transmission = model == MODEL_WATER || model == MODEL_DIELECTRIC || model == MODEL_RAIN ? 1.0f : 0.0f;
         boolean labPbr = (features & (FEATURE_SPEC | FEATURE_NORMAL)) != 0;
         RtMaterialDesc.Source source = neutral ? RtMaterialDesc.Source.NEUTRAL
                 : (labPbr ? RtMaterialDesc.Source.LAB_PBR : RtMaterialDesc.Source.HEURISTIC);
@@ -640,18 +645,20 @@ public final class RtMaterialRegistry {
         private final int[] fallbackVariants;
         private final int waterId;
         private final int lavaId;
+        private final int rainId;
         private final List<RtMaterialDesc> descriptions;
         private final List<RtEmissionGrid> grids;
         private final List<CompiledOverride> overrides;
 
         private Snapshot(long epoch, Map<TextureAtlasSprite, int[]> ids, int[] fallbackVariants,
-                         int waterId, int lavaId, List<RtMaterialDesc> descriptions,
+                         int waterId, int lavaId, int rainId, List<RtMaterialDesc> descriptions,
                          List<RtEmissionGrid> grids, List<CompiledOverride> overrides) {
             this.epoch = epoch;
             this.ids = ids;
             this.fallbackVariants = fallbackVariants;
             this.waterId = waterId;
             this.lavaId = lavaId;
+            this.rainId = rainId;
             this.descriptions = descriptions;
             this.grids = grids;
             this.overrides = overrides;
@@ -667,6 +674,10 @@ public final class RtMaterialRegistry {
 
         public int lavaId() {
             return lavaId;
+        }
+
+        public int rainId() {
+            return rainId;
         }
 
         public int materialCount() {

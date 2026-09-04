@@ -390,6 +390,7 @@ public final class RtEntityCapture implements VertexConsumer {
         float tr = ((c >> 16) & 0xFF) * (1f / 255f);
         float tg = ((c >> 8) & 0xFF) * (1f / 255f);
         float tb = (c & 0xFF) * (1f / 255f);
+        float ta = ((c >> 24) & 0xFF) * (1f / 255f); // alpha for per-prim opacity (used by rain particles)
         for (int t = 0; t < 2; t++) { // one {normal+emission, tint, mat} record per triangle
             prim.add(nx);
             prim.add(ny);
@@ -400,7 +401,7 @@ public final class RtEntityCapture implements VertexConsumer {
             prim.add(tb);
             prim.add((float) currentTexSlot); // tint.w = bindless texture slot
             prim.add(Float.intBitsToFloat(currentMaterialId));
-            prim.add(0f); // flags
+            prim.add(Float.floatToRawIntBits(ta)); // flags = alpha as float bits (0 for opaque, 0-1 for translucent)
             prim.add(0f); // aux0
             prim.add(0f); // aux1
             alphaBuckets.add(currentAlphaBucket);

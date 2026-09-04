@@ -67,6 +67,14 @@ public class CausticaOptionsScreen extends OptionsSubScreen {
                 Component.translatable("caustica.options.water.open"),
                 button -> this.minecraft.gui.setScreen(new CausticaWaterOptionsScreen(this, this.options)))
                 .build());
+        this.list.addBig(Button.builder(
+                Component.translatable("caustica.options.sunPosition.open"),
+                button -> this.minecraft.gui.setScreen(new CausticaSunPositionOptionsScreen(this, this.options)))
+                .build());
+        this.list.addBig(Button.builder(
+                Component.translatable("caustica.options.weather.open"),
+                button -> this.minecraft.gui.setScreen(new CausticaWeatherOptionsScreen(this, this.options)))
+                .build());
         boolean ptEnabled = CausticaConfig.Rt.ENABLED.value();
         for (ResetableOption row : RtVideoOptions.mainOptions()) {
             boolean disabled = !ptEnabled && RtVideoOptions.isRrToggle(row.option());
