@@ -3,6 +3,7 @@ package dev.comfyfluffy.caustica.mixin;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vulkan.VulkanDevice;
 
+import dev.comfyfluffy.caustica.rt.RtFpsCap;
 import dev.comfyfluffy.caustica.rt.RtReflex;
 import dev.comfyfluffy.caustica.rt.RtUiOverlay;
 
@@ -25,6 +26,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * just before {@code renderFrame} is called); RENDERSUBMIT/PRESENT markers are set from
  * {@code GameRendererMixin}/{@code VulkanGpuSurfaceMixin} respectively. No-ops entirely unless Reflex is
  * enabled AND {@link RtReflex#applySleepMode} has already succeeded for the current swapchain.
+ *
+ * <p>{@code renderFrame} TAIL hosts the fractional FPS cap ({@link RtFpsCap}): the same spot vanilla
+ * applies {@code FramerateLimiter.limitDisplayFPS} (after present). Unlike vanilla's call site — gated
+ * on Max Framerate below 260 — this injection runs unconditionally, so the cap works while vanilla's
+ * slider sits at Unlimited.
  */
 @Mixin(Minecraft.class)
 public abstract class MinecraftMixin {
@@ -43,6 +49,10 @@ public abstract class MinecraftMixin {
 		RtReflex.INSTANCE.sleep(device.vkDevice(), swapchain);
 		RtReflex.INSTANCE.marker(device.vkDevice(), swapchain, RtReflex.MARKER_SIMULATION_START,
 				RtReflex.INSTANCE.currentSimFrameId());
+		// Inside the simulation window per the spec — emits TRIGGER_FLASH when a left click was recorded
+		// since the last frame (MouseHandlerMixin), tagged with the presentId this frame's first present
+		// will carry.
+		RtReflex.INSTANCE.flushInputFlash(device.vkDevice(), swapchain);
 	}
 
 	@Inject(method = "runTick",
@@ -55,6 +65,11 @@ public abstract class MinecraftMixin {
 		}
 		RtReflex.INSTANCE.marker(device.vkDevice(), swapchain, RtReflex.MARKER_SIMULATION_END,
 				RtReflex.INSTANCE.currentSimFrameId());
+	}
+
+	@Inject(method = "renderFrame", at = @At("TAIL"))
+	private void caustica$fractionalFpsCap(boolean advancedGameTime, CallbackInfo ci) {
+		RtFpsCap.INSTANCE.endFrame();
 	}
 
 	private static VulkanDevice caustica$reflexDevice() {

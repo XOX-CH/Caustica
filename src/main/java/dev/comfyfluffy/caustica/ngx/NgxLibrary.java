@@ -7,6 +7,7 @@ import java.lang.foreign.MemorySegment;
 import java.lang.foreign.SymbolLookup;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
 /**
@@ -34,6 +35,9 @@ public final class NgxLibrary {
 	private final MethodHandle dlssgMultiFrameCountMax;
 	private final MethodHandle createDlssg;
 	private final MethodHandle evaluateDlssg;
+	private final MethodHandle patchDlssgArchGate;
+	private final MethodHandle patchDlssgMidpoint;
+	private final MethodHandle dlssgMidpointDetail;
 	private final MethodHandle release;
 	private final MethodHandle shutdown;
 	private final MethodHandle lastResult;
@@ -121,6 +125,12 @@ public final class NgxLibrary {
 						ValueLayout.JAVA_FLOAT, ValueLayout.JAVA_FLOAT,
 						ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT,
 						ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
+		this.patchDlssgArchGate = optionalHandle(lookup, "ngxshim_patch_dlssg_arch_gate",
+				FunctionDescriptor.of(ValueLayout.JAVA_INT));
+		this.patchDlssgMidpoint = optionalHandle(lookup, "ngxshim_patch_dlssg_midpoint",
+				FunctionDescriptor.of(ValueLayout.JAVA_INT));
+		this.dlssgMidpointDetail = optionalHandle(lookup, "ngxshim_dlssg_midpoint_detail",
+				FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT));
 		this.release = handle(lookup, "ngxshim_release",
 				FunctionDescriptor.ofVoid(ValueLayout.ADDRESS));
 		this.shutdown = handle(lookup, "ngxshim_shutdown",
@@ -306,6 +316,51 @@ public final class NgxLibrary {
 			return (int) this.dlssgMultiFrameCountMax.invokeExact();
 		} catch (Throwable t) {
 			throw new RuntimeException("ngxshim_dlssg_multi_frame_count_max failed", t);
+		}
+	}
+
+	/** Rewrite the DLSSG multi-frame arch gate (0x1b0 -> 0x190) in the mapped nvngx_dlssg.dll (Ada unlock). Idempotent; returns the number of sites rewritten. */
+	public int patchDlssgArchGate() {
+		if (patchDlssgArchGate == null) {
+			return 0;
+		}
+		try {
+			return (int) this.patchDlssgArchGate.invokeExact();
+		} catch (Throwable t) {
+			throw new RuntimeException("ngxshim_patch_dlssg_arch_gate failed", t);
+		}
+	}
+
+	/** Whether the loaded shim exposes the temporal (midpoint) correction (false for a stale shim). */
+	public boolean hasDlssgMidpoint() {
+		return patchDlssgMidpoint != null;
+	}
+
+	/** Redirect the DLSSG temporal kernel to a blend-weight-corrected rebuild so 3x..6x frames land at
+	 * 1/N..(N-1)/N instead of all at the midpoint. Idempotent; returns the number of redirected
+	 * descriptor slots (0 when the bundled kernel does not match the supported profile). */
+	public int patchDlssgMidpoint() {
+		if (patchDlssgMidpoint == null) {
+			return 0;
+		}
+		try {
+			return (int) this.patchDlssgMidpoint.invokeExact();
+		} catch (Throwable t) {
+			throw new RuntimeException("ngxshim_patch_dlssg_midpoint failed", t);
+		}
+	}
+
+	/** Human-readable result of the last midpoint patch attempt ("" when unsupported by the shim). */
+	public String dlssgMidpointDetail() {
+		if (dlssgMidpointDetail == null) {
+			return "";
+		}
+		try (Arena arena = Arena.ofConfined()) {
+			MemorySegment buf = arena.allocate(256);
+			int n = (int) this.dlssgMidpointDetail.invokeExact(buf, 256);
+			return n <= 0 ? "" : buf.getString(0, StandardCharsets.UTF_8);
+		} catch (Throwable t) {
+			throw new RuntimeException("ngxshim_dlssg_midpoint_detail failed", t);
 		}
 	}
 

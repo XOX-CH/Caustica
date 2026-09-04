@@ -52,6 +52,7 @@ public final class RtReflex {
     public static final int MARKER_RENDERSUBMIT_END = NVLowLatency2.VK_LATENCY_MARKER_RENDERSUBMIT_END_NV;
     public static final int MARKER_PRESENT_START = NVLowLatency2.VK_LATENCY_MARKER_PRESENT_START_NV;
     public static final int MARKER_PRESENT_END = NVLowLatency2.VK_LATENCY_MARKER_PRESENT_END_NV;
+    public static final int MARKER_TRIGGER_FLASH = NVLowLatency2.VK_LATENCY_MARKER_TRIGGER_FLASH_NV;
 
     private static final long SLEEP_WAIT_TIMEOUT_NS = 200_000_000L; // 200ms: generous, never expected to hit
 
@@ -62,12 +63,18 @@ public final class RtReflex {
     private boolean lastBoost;
     private int lastMinIntervalUs;
     private boolean failed;
+    // Set by the GLFW left-click callback, consumed by flushInputFlash in the next simulation window.
+    private volatile boolean inputFlashPending;
 
     private RtReflex() {
     }
 
     public static boolean enabled() {
-        return CausticaConfig.Rt.Reflex.ENABLED.value() && RtDeviceBringup.reflexEnabled();
+        // FG's auto-Reflex linkage turns Reflex on alongside FG (DLSS-G is designed to run with Reflex —
+        // it is what paces FG's deeper present queue); the standalone toggle still applies when FG is off.
+        boolean requested = CausticaConfig.Rt.Reflex.ENABLED.value()
+                || (CausticaConfig.Rt.Fg.ENABLED.value() && CausticaConfig.Rt.Fg.AUTO_REFLEX.value());
+        return requested && RtDeviceBringup.reflexEnabled();
     }
 
     /** Current sim frame's marker id (set by the last {@link #sleep} call) — tags SIMULATION/RENDERSUBMIT markers. */
@@ -176,6 +183,31 @@ public final class RtReflex {
         } catch (Throwable t) {
             CausticaMod.LOGGER.warn("Reflex: vkSetLatencyMarkerNV({}) threw; ignoring", marker, t);
         }
+    }
+
+    /**
+     * Record a left mouse press for the next simulation window. Called from the raw GLFW callback — no
+     * Vulkan calls happen there; the actual TRIGGER_FLASH marker is emitted by {@link #flushInputFlash}
+     * inside the simulation window where the Vulkan spec places it. This is what lets the driver correlate
+     * clicks with scanout (PC Latency / click-to-photon diagnostics in NVIDIA tooling); purely diagnostic,
+     * no effect on pacing.
+     */
+    public void markInputFlash() {
+        inputFlashPending = true;
+    }
+
+    /**
+     * Emit the pending input-flash marker, if any. The click's effect lands in the frame being simulated,
+     * whose first present (a generated frame under FG, already interpolating toward the effect) is the next
+     * {@code vkQueuePresentKHR} — hence {@link #advancePresentId()} + 1. Collapses multiple clicks within
+     * one frame into a single marker, which is what the driver's frame-based latency pipeline expects.
+     */
+    public void flushInputFlash(VkDevice device, long swapchain) {
+        if (!inputFlashPending) {
+            return;
+        }
+        inputFlashPending = false;
+        marker(device, swapchain, MARKER_TRIGGER_FLASH, presentCounter + 1);
     }
 
     private void ensureSemaphore(VkDevice device) {

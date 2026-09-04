@@ -23,6 +23,14 @@
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
+#include <string>
+
+#if defined(_WIN32)
+#include <windows.h>
+#include <cwchar>
+
+#include "midpoint.hpp"
+#endif
 
 // Lightweight diagnostic logging. The shim is loaded into the JVM via FFM and a
 // crash here surfaces only as a bare SIGSEGV on the Java side, so we can trace every
@@ -78,6 +86,155 @@ static NVSDK_NGX_Resource_VK makeImageResource(VkImageView view, VkImage image, 
     range.layerCount = 1;
     return NVSDK_NGX_Create_ImageView_Resource_VK(view, image, range, (VkFormat) format, width, height, readWrite);
 }
+
+#if defined(_WIN32)
+// ---------------------------------------------------------------- arch gate
+//
+// The bundled nvngx_dlssg.dll ships multi-frame generation (3x..6x) gated to
+// Blackwell (RTX 50) only. Two comparisons against the NVAPI arch id 0x1b0
+// (GB20x) do the gating: DLSSGInstanceManager::PopulateParameters advertises
+// MultiFrameCountMax = 1 below it, and a second compare sets a runtime flag that
+// drives generation itself. Rewriting 0x1b0 -> 0x190 (AD10x) lets an RTX 40 card
+// take the Blackwell path.
+//
+// NGX verifies the snippet's Authenticode signature only while mapping the file,
+// so the on-disk bytes stay untouched. We LoadLibrary the original signed DLL and
+// patch only the mapped .text -- the same order NGX itself uses, so
+// PopulateParameters then runs on the patched image. Only `cmp` forms are
+// rewritten; a `mov r32, 0x1b0` is the arch-id lookup table returning Blackwell's
+// own id and must be left alone. Both encodings the driver ships are matched:
+// 3D imm32 (cmp eax, imm32) and 81 /7 imm32 (cmp r32, imm32).
+
+static const wchar_t* kDlssgDllName = L"nvngx_dlssg.dll";
+static unsigned int g_archGateSites = 0;
+static bool g_archGateDone = false;
+
+static unsigned int patchArchGatesInModule(HMODULE mod) {
+    if (mod == nullptr || g_archGateDone) {
+        return g_archGateSites;
+    }
+    auto* base = reinterpret_cast<unsigned char*>(mod);
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) {
+        return 0;
+    }
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE || nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+        return 0;
+    }
+
+    unsigned char* sites[4];
+    unsigned int siteCount = 0;
+
+    const auto* section = IMAGE_FIRST_SECTION(nt);
+    for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++section) {
+        if ((section->Characteristics & IMAGE_SCN_MEM_EXECUTE) == 0) {
+            continue;
+        }
+        unsigned char* start = base + section->VirtualAddress;
+        const size_t size = section->Misc.VirtualSize;
+        if (size < 6) {
+            continue;
+        }
+        for (size_t off = 0; off + 6 <= size; ++off) {
+            unsigned char* site = nullptr;
+            if (start[off] == 0x3D && start[off + 1] == 0xB0 && start[off + 2] == 0x01 &&
+                start[off + 3] == 0x00 && start[off + 4] == 0x00) {
+                site = start + off + 1;
+            } else if (start[off] == 0x81 && start[off + 1] >= 0xF8 && start[off + 1] <= 0xFF &&
+                       start[off + 2] == 0xB0 && start[off + 3] == 0x01 && start[off + 4] == 0x00 &&
+                       start[off + 5] == 0x00) {
+                site = start + off + 2;
+            }
+            if (site == nullptr) {
+                continue;
+            }
+            if (siteCount >= 4) {
+                return 0; // unexpected gate count; leave the module alone
+            }
+            sites[siteCount++] = site;
+        }
+    }
+
+    if (siteCount == 0) {
+        return 0;
+    }
+
+    for (unsigned int j = 0; j < siteCount; ++j) {
+        DWORD oldProtect = 0;
+        if (VirtualProtect(sites[j], 1, PAGE_EXECUTE_READWRITE, &oldProtect) == 0) {
+            continue;
+        }
+        *sites[j] = 0x90; // 0x1b0 -> 0x190
+        DWORD ignored = 0;
+        VirtualProtect(sites[j], 1, oldProtect, &ignored);
+        FlushInstructionCache(GetCurrentProcess(), sites[j], 1);
+    }
+    g_archGateSites = siteCount;
+    g_archGateDone = true;
+    return siteCount;
+}
+
+static void preloadAndPatchDlssg(const wchar_t* featureDllPath) {
+    if (g_archGateDone || featureDllPath == nullptr || featureDllPath[0] == L'\0') {
+        return;
+    }
+    wchar_t path[1024];
+    if (std::wcslen(featureDllPath) + std::wcslen(kDlssgDllName) + 2 > sizeof(path) / sizeof(path[0])) {
+        return;
+    }
+    std::wcscpy(path, featureDllPath);
+    size_t n = std::wcslen(path);
+    if (n == 0 || (path[n - 1] != L'\\' && path[n - 1] != L'/')) {
+        std::wcscat(path, L"\\");
+    }
+    std::wcscat(path, kDlssgDllName);
+    HMODULE mod = LoadLibraryW(path);
+    if (mod == nullptr) {
+        NGX_LOG("arch_gate: could not preload nvngx_dlssg.dll -- multi-frame unlock skipped");
+        return;
+    }
+    unsigned int sites = patchArchGatesInModule(mod);
+    NGX_LOG("arch_gate: rewrote %u arch-gate site(s) (0x1b0 -> 0x190) in nvngx_dlssg.dll", sites);
+}
+
+// ---------------------------------------------------------------- temporal midpoint
+//
+// With the arch gate open, 3x..6x generate the right NUMBER of frames but each
+// blended frame lands at the temporal midpoint: the interpolation kernel ships a
+// compiled-in 0.5 blend weight, so 4x shows three identical halfway frames instead
+// of frames at 1/4, 2/4, 3/4. midpoint::Apply (midpoint.hpp) rewrites the kernel's
+// sm_89 PTX so the blend weight comes from the kernel's temporal parameter and
+// redirects every descriptor that references the original fatbin. Strictly
+// validated against the known kernel profile; the module is left untouched when
+// nothing matches. The rebuilt fatbin allocation lives for the process lifetime --
+// the shim pins nvngx_dlssg.dll for the whole run, so the descriptors stay live.
+static bool g_midpointDone = false;
+static unsigned int g_midpointSlots = 0;
+static std::string g_midpointDetail;
+
+static void applyMidpointPatch() {
+    if (g_midpointDone) {
+        return;
+    }
+    HMODULE mod = GetModuleHandleW(kDlssgDllName);
+    if (mod == nullptr) {
+        // Not mapped yet (preload path missing); a later call can retry once NGX
+        // has loaded the module itself.
+        g_midpointDetail = "nvngx_dlssg.dll is not loaded";
+        return;
+    }
+    g_midpointDone = true;
+    size_t slots = 0;
+    std::string detail;
+    if (!ngxshim::midpoint::Apply(mod, slots, detail) && detail.empty()) {
+        detail = "unrecognized module layout";
+    }
+    g_midpointSlots = (unsigned int) slots;
+    g_midpointDetail = detail;
+    NGX_LOG("midpoint: %s", g_midpointDetail.c_str());
+}
+#endif
 
 extern "C" {
 
@@ -140,6 +297,17 @@ NGX_SHIM_EXPORT int ngxshim_init(unsigned long long appId, const wchar_t* dataPa
             appId, (void*) dataPath, (void*) instance, (void*) physicalDevice, (void*) device,
             getInstanceProcAddr, getDeviceProcAddr, (void*) featureDllPath);
     g_device = device;
+
+#if defined(_WIN32)
+    // Multi-frame generation (3x..6x) is gated to Blackwell in the bundled
+    // nvngx_dlssg.dll. Pre-load and patch it BEFORE NGX populates capabilities so the
+    // advertised MultiFrameCountMax and the runtime generation flag both take the
+    // un-gated path (see the arch-gate block above), then apply the temporal
+    // (midpoint) correction to the same mapped module before any feature can load
+    // the interpolation kernel.
+    preloadAndPatchDlssg(featureDllPath);
+    applyMidpointPatch();
+#endif
 
     NVSDK_NGX_FeatureCommonInfo info;
     std::memset(&info, 0, sizeof(info));
@@ -504,6 +672,62 @@ NGX_SHIM_EXPORT unsigned int ngxshim_dlssg_multi_frame_count_max() {
     unsigned int maxCount = 0;
     NVSDK_NGX_Parameter_GetUI(g_capabilityParams, NVSDK_NGX_DLSSG_Parameter_MultiFrameCountMax, &maxCount);
     return maxCount;
+}
+
+// Rewrites the multi-frame architecture gates (0x1b0 -> 0x190) in the mapped
+// nvngx_dlssg.dll so Ada (RTX 40) can generate 3x..6x frames. Idempotent: safe to
+// call after init (which performs the same patch) to confirm/re-patch; returns the
+// number of sites rewritten (0 when already done, unavailable, or non-Windows).
+NGX_SHIM_EXPORT int ngxshim_patch_dlssg_arch_gate() {
+#if defined(_WIN32)
+    if (g_archGateDone) {
+        return (int) g_archGateSites;
+    }
+    HMODULE mod = GetModuleHandleW(kDlssgDllName);
+    if (mod == nullptr) {
+        return 0;
+    }
+    return (int) patchArchGatesInModule(mod);
+#else
+    return 0;
+#endif
+}
+
+// Redirects the DLSSG temporal kernel's fatbin to a blend-weight-corrected
+// rebuild (see midpoint.hpp) so unlocked 3x..6x interpolate at 1/N..(N-1)/N
+// instead of all landing at the midpoint. Init performs the same patch; this
+// export is an idempotent re-entry point for the Java probe. Returns the number
+// of redirected descriptor slots (0 when not applied, unavailable, or
+// non-Windows).
+NGX_SHIM_EXPORT int ngxshim_patch_dlssg_midpoint() {
+#if defined(_WIN32)
+    applyMidpointPatch();
+    return (int) g_midpointSlots;
+#else
+    return 0;
+#endif
+}
+
+// Copies the human-readable result of the last midpoint patch attempt into
+// outBuf (NUL-terminated); returns the number of bytes written.
+NGX_SHIM_EXPORT int ngxshim_dlssg_midpoint_detail(char* outBuf, int bufLen) {
+#if defined(_WIN32)
+    if (outBuf == nullptr || bufLen <= 0) {
+        return 0;
+    }
+    int n = (int) g_midpointDetail.size();
+    if (n > bufLen - 1) {
+        n = bufLen - 1;
+    }
+    std::memcpy(outBuf, g_midpointDetail.data(), (size_t) n);
+    outBuf[n] = 0;
+    return n;
+#else
+    if (outBuf != nullptr && bufLen > 0) {
+        outBuf[0] = 0;
+    }
+    return 0;
+#endif
 }
 
 // Creates a DLSS Frame Generation (DLSSG) feature. Width/Height are the backbuffer (present) size;
