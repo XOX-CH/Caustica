@@ -1,8 +1,11 @@
 {
 	"caustica.options.title": "Caustica-DLSS",
-	"key.caustica.openOptions": "打开 Caustica-DLSS 选项",
-	"caustica.options.reset": "重置",
-	"caustica.options.detail.open": "细节调整",
+		"key.caustica.openOptions": "打开 Caustica-DLSS 选项",
+		"caustica.options.reset": "重置",
+		"caustica.options.fg.open": "DLSS插帧-支持40系",
+		"caustica.options.fg.title": "DLSS插帧-支持40系",
+		"caustica.options.fg.header": "DLSS插帧-支持40系",
+		"caustica.options.detail.open": "细节调整",
 	"caustica.options.detail.title": "细节调整",
 	"caustica.options.detail.header": "细节调整",
 
@@ -77,9 +80,11 @@
 	"caustica.options.rt.debugView.4": "粗糙度",
 	"caustica.options.rt.debugView.5": "运动",
 	"caustica.options.rt.debugView.6": "高光",
-	"caustica.options.rt.debugView.7": "高光运动",
-
-	"caustica.options.rt.roughnessScale": "粗糙度缩放",
+		"caustica.options.rt.debugView.7": "高光运动",
+		"caustica.options.rt.debugView.8": "曝光伪彩色",
+		"caustica.options.rt.debugView.9": "测光权重",
+	
+		"caustica.options.rt.roughnessScale": "粗糙度缩放",
 	"caustica.options.rt.roughnessScale.tooltip": "材质粗糙度的全局倍率。数值越低反射越清晰；数值越高反射越模糊。",
 
 	"caustica.options.rt.gamma": "伽马值",
@@ -149,12 +154,20 @@
 	"caustica.options.rt.dlssFg.tooltip": "NVIDIA DLSS 帧生成。在渲染帧之间插值生成额外帧，提升画面流畅度。需要支持的硬件。",
 	"caustica.options.rt.dlssFgMultiFrame": "多帧补帧数",
 	"caustica.options.rt.dlssFgMultiFrame.tooltip": "每渲染帧生成的帧数。数值越高越流畅，但需要更多 GPU 性能余量。2x = 生成1帧，6x = 生成5帧。",
-	"caustica.options.rt.reflex": "NVIDIA Reflex",
+		"caustica.options.rt.dlssFgForceFifo": "FG 垂直同步",
+		"caustica.options.rt.dlssFgForceFifo.tooltip": "帧生成启用时强制垂直同步 (FIFO)，确保每个生成帧都能显示到屏幕上；总输出以刷新率为节奏。关闭则保持当前显示模式，FPS 帧率可超过刷新率——但生成帧会被真实帧替换，画面流畅度不会提升。",
+		"caustica.options.rt.dlssFgAutoReflex": "FG 自动 Reflex",
+		"caustica.options.rt.dlssFgAutoReflex.tooltip": "帧生成启用时自动开启 NVIDIA Reflex。Reflex 会同步帧提交与 GPU 渲染完成，防止 FG 的深层提交队列带来无上限的输入延迟。FG 关闭时仍可使用独立的 Reflex 开关。在游戏中途开启需要重启游戏才能生效（如果 Reflex 在启动时未开启）。",
+		"caustica.options.rt.reflex": "NVIDIA Reflex",
 	"caustica.options.rt.reflex.tooltip": "NVIDIA Reflex 低延迟技术。通过同步模拟循环与渲染器来降低系统延迟。需要支持的硬件。",
 	"caustica.options.rt.reflexBoost": "Reflex 加速",
 	"caustica.options.rt.reflexBoost.tooltip": "在 Reflex 启用时将 GPU 时钟强制提升至最高频率，进一步降低延迟，但会增加功耗。",
-
-	"caustica.options.water.save": "储存",
+		"caustica.options.rt.fgSync": "FG 帧同步",
+		"caustica.options.rt.fgSync.tooltip": "将下方渲染帧率上限锁定为刷新率 ÷ 帧生成倍率，实现精确的垂直消隐同步（160Hz：2x → 80.0，3x → 53.333，6x → 26.667）。帧生成关闭时无上限菜单和加载界面不受限制。此开关开启时滑块被锁定（仅显示）。关闭此开关也会将手动帧率上限重置为无限制。",
+		"caustica.options.rt.fpsCap": "渲染帧率上限",
+		"caustica.options.rt.fpsCap.tooltip": "以 0.1 fps 为步进的精确渲染帧率上限，使用原版最大帧率语义：帧生成会在此基础上倍增，因此 6x 下上限 26.7 仍可呈现 ~160 fps（外部帧率限制器如 RTSS 会将生成帧也限制住）。FG 帧同步开启时滑块被锁定（仅显示）；关闭 FG 帧同步后此值重置为无限制，之后可自由调整。260.0 = 无限制。与原版最大帧率叠加——两者取较低值，建议将原版设为无限制。",
+	
+		"caustica.options.water.save": "储存",
 	"caustica.options.water.save.active": "▶ 点击预设储存",
 	"caustica.options.water.delete": "删除",
 	"caustica.options.water.delete.active": "▶ 点击预设删除",

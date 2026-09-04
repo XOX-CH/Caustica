@@ -428,7 +428,10 @@ public final class RtDeviceBringup {
     }
 
     private static boolean reflexRequested() {
-        return CausticaConfig.Rt.Reflex.ENABLED.value();
+        // FG's auto-Reflex linkage counts as a request too: the extension must be present at device
+        // creation for the runtime gate (RtReflex.enabled) to be able to turn Reflex on with FG.
+        return CausticaConfig.Rt.Reflex.ENABLED.value()
+                || (CausticaConfig.Rt.Fg.ENABLED.value() && CausticaConfig.Rt.Fg.AUTO_REFLEX.value());
     }
 
     /** Query every feature boolean Caustica might enable in one complete Features2 chain. */

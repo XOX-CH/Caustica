@@ -224,14 +224,14 @@ public abstract class VulkanGpuSurfaceMixin {
 	}
 
 	/**
-	 * Force FIFO when multi-frame generation (3x+) is active. The driver paces MFG's queued presents with
-	 * hardware flip metering on Blackwell; on Ada that hardware doesn't exist, and with a non-pacing mode
-	 * (IMMEDIATE/MAILBOX) the presentation engine holds a swapchain image indefinitely waiting for scanout
-	 * timing that never arrives — the second generated-frame acquire then times out on every frame and the
-	 * game drops to one frame per acquire timeout. FIFO's vblank contract (one queued image consumed and one
-	 * acquired image released per refresh) is the software pacing the MFG path needs, and Vulkan guarantees
-	 * FIFO support on every surface. 2x keeps the user's present mode: single-frame generation paces fine
-	 * without it.
+	 * Force FIFO while frame generation is active (any multiplier), unless the user opted out via
+	 * {@code caustica.rt.fg.forceFifoPresent}. Every generated frame is presented ahead of its real
+	 * frame; with a non-pacing mode (IMMEDIATE/MAILBOX) the later real-frame present silently replaces
+	 * the queued generated frames before scanout — only the real frames display, at every multiplier
+	 * including 2x. FIFO's vblank contract (one queued image consumed and one acquired image released
+	 * per refresh) is the software pacing the FG path needs, and Vulkan guarantees FIFO support on every
+	 * surface. Opting out keeps the game's present mode: the fps counter can exceed the refresh rate,
+	 * but generated frames are discarded before they reach the display.
 	 */
 	@ModifyArg(method = "configure",
 			at = @At(value = "INVOKE",
@@ -241,9 +241,14 @@ public abstract class VulkanGpuSurfaceMixin {
 		int effective = original;
 		if (original != KHRSurface.VK_PRESENT_MODE_FIFO_KHR
 				&& CausticaConfig.Rt.Fg.ENABLED.value()
-				&& CausticaConfig.Rt.Fg.MULTI_FRAME_COUNT.value() > 1) {
+				&& CausticaConfig.Rt.Fg.FORCE_FIFO_PRESENT.value()) {
 			effective = KHRSurface.VK_PRESENT_MODE_FIFO_KHR;
-			CausticaMod.LOGGER.info("DLSS-FG: multi-frame ({}x) requires FIFO pacing — overriding present mode {} -> FIFO",
+			CausticaMod.LOGGER.info("DLSS-FG: frame generation ({}x) pacing — overriding present mode {} -> FIFO",
+					CausticaConfig.Rt.Fg.MULTI_FRAME_COUNT.value() + 1, caustica$presentModeName(original));
+		} else if (original != KHRSurface.VK_PRESENT_MODE_FIFO_KHR
+				&& CausticaConfig.Rt.Fg.ENABLED.value()) {
+			CausticaMod.LOGGER.warn("DLSS-FG: frame generation ({}x) is running with present mode {} (force-FIFO disabled) — "
+					+ "queued generated frames will be replaced before scanout; only the real frames display",
 					CausticaConfig.Rt.Fg.MULTI_FRAME_COUNT.value() + 1, caustica$presentModeName(original));
 		}
 		caustica$effectivePresentMode = effective;

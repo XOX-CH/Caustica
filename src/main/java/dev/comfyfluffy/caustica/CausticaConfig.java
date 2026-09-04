@@ -564,6 +564,26 @@ public final class CausticaConfig {
         public static final IntSetting WORKER_THREADS =
                 intAtLeast("caustica.rt.workerThreads", "worker-threads", defaultWorkerThreads(), 1);
 
+        /**
+         * Fractional render-rate cap in 0.1 fps steps, vanilla Max Framerate semantics: caps the render
+         * loop, not presents, so Frame Generation multiplies on top (at 6x a cap of 26.7 still presents
+         * ~160 fps — a present-count limiter like RTSS would clamp the generated frames to 26). The
+         * slider maximum (260.0) is the unlimited sentinel.
+         */
+        public static final FloatSetting FPS_CAP =
+                clampedFloat("caustica.rt.fpsCap", "fps-cap", 260.0f, 10.0f, 260.0f);
+
+        /**
+         * FG Sync: while Frame Generation is presenting, the render-rate cap follows refresh rate ÷
+         * multiplier (160 Hz at 3x → 53.333 fps rendered) instead of the manual {@link #FPS_CAP} value,
+         * keeping rendered frames aligned to whole vblank multiples. Frames without FG presenting
+         * (menus, loading, FG disabled or failed) run uncapped; the manual cap applies only while this
+         * is off, and disabling this resets the manual cap to the unlimited sentinel (it was
+         * unreachable while synced, so any stored value is stale).
+         */
+        public static final BooleanSetting SYNC_FRAME_CAP =
+                bool("caustica.rt", "sync-frame-cap", true);
+
         private Rt() {
         }
 
@@ -781,6 +801,25 @@ public final class CausticaConfig {
             public static final BooleanSetting ENABLED = bool("caustica.rt.fg", "frame-generation.enabled", false);
             public static final IntSetting MULTI_FRAME_COUNT =
                     intAtLeast("caustica.rt.fg.multiFrameCount", "frame-generation.multi-frame-count", 1, 1);
+            /**
+             * Override the present mode to FIFO while frame generation is active (any multiplier, 2x
+             * included). FIFO's one-image-per-vblank contract is what lets every generated frame reach the
+             * display — without it a later present silently replaces the queued generated frames and only
+             * the real frames display. Turning it off keeps the game's own present mode: the fps counter
+             * can exceed the refresh rate, but generated frames are discarded before scanout.
+             */
+            public static final BooleanSetting FORCE_FIFO_PRESENT =
+                    bool("caustica.rt.fg.forceFifoPresent", "frame-generation.force-fifo-present", true);
+            /**
+             * Automatically request NVIDIA Reflex while Frame Generation is active. Reflex paces the
+             * simulation start against GPU render completion, which is what keeps FG's deeper present
+             * queue from adding unbounded input latency — DLSS-G is designed to run with Reflex on. When
+             * active this overrides the Reflex toggle (which still applies whenever FG is off). The
+             * underlying VK_NV_low_latency2 device extension is chosen at startup, so a mid-session
+             * enable only takes effect after a restart.
+             */
+            public static final BooleanSetting AUTO_REFLEX =
+                    bool("caustica.rt.fg.autoReflex", "frame-generation.auto-reflex", true);
 
             private Fg() {
             }

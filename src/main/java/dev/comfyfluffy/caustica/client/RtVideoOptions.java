@@ -6,6 +6,8 @@ import dev.comfyfluffy.caustica.CausticaConfig.BooleanSetting;
 import dev.comfyfluffy.caustica.CausticaConfig.FloatSetting;
 import dev.comfyfluffy.caustica.CausticaConfig.IntSetting;
 import dev.comfyfluffy.caustica.CausticaConfig.StringSetting;
+import dev.comfyfluffy.caustica.CausticaMod;
+import dev.comfyfluffy.caustica.rt.RtDeviceBringup;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -42,34 +44,61 @@ public final class RtVideoOptions {
     /**
      * Runtime-tunable RT options shown in the main Caustica-DLSS window (the ones that are NOT part of
      * the "细节调整" submenu). These are the core RT controls: exposure, sampling, toggles, and DLSS.
+     * Frame Generation options live in the FG submenu ({@link #fgOptions()}).
      */
     public static ResetableOption[] mainOptions() {
-        List<ResetableOption> options = new ArrayList<>(List.of(
-            pathTracingEnabled(),
-            exposureMode(),
-            manualEv(),
-            gamma(),
-            spp(),
-            maxBounces(),
-            entities(),
-            particles(),
-            waterWaves(),
-            dlssQuality(),
-            dlssRrEnabled(),
-            dlssRrPreset(),
-            dlssUpscalePreset(),
-            dlssFgEnabled(),
-            dlssFgMultiFrame(),
-            reflexEnabled(),
-            reflexBoost()
-        ));
-        if (CausticaConfig.Rt.Hdr.swapchainPqAvailable()) {
-            options.add(hdrEnabled());
-            options.add(hdrUiBrightness());
-            options.add(hdrPeak());
+        // Construction syncs every widget to its current runtime value; suppress the change listeners'
+        // side effects (surface invalidation, UI refresh) while the widgets are being wired up.
+        buildingOptions = true;
+        List<ResetableOption> options;
+        try {
+            options = new ArrayList<>(List.of(
+                pathTracingEnabled(),
+                exposureMode(),
+                manualEv(),
+                gamma(),
+                spp(),
+                maxBounces(),
+                entities(),
+                particles(),
+                waterWaves(),
+                dlssQuality(),
+                dlssRrEnabled(),
+                dlssRrPreset(),
+                dlssUpscalePreset()
+            ));
+            if (CausticaConfig.Rt.Hdr.swapchainPqAvailable()) {
+                options.add(hdrEnabled());
+                options.add(hdrUiBrightness());
+                options.add(hdrPeak());
+            }
+            options.add(debugView());
+        } finally {
+            buildingOptions = false;
         }
-        options.add(debugView());
         return options.toArray(ResetableOption[]::new);
+    }
+
+    /**
+     * Frame Generation options shown in the FG submenu ({@link CausticaFgOptionsScreen}). Includes
+     * the FG toggle, multiplier, V-Sync, Reflex linkage, and the FG Sync / cap slider pair.
+     */
+    public static ResetableOption[] fgOptions() {
+        buildingOptions = true;
+        try {
+            return new ResetableOption[] {
+                dlssFgEnabled(),
+                dlssFgMultiFrame(),
+                dlssFgForceFifo(),
+                dlssFgAutoReflex(),
+                reflexEnabled(),
+                reflexBoost(),
+                fgSync(),
+                fpsCap()
+            };
+        } finally {
+            buildingOptions = false;
+        }
     }
 
     /**
@@ -228,6 +257,73 @@ public final class RtVideoOptions {
         return option == lastRrToggleInstance;
     }
 
+    /** FG Sync toggle from the most recent mainOptions() build; lets the screen re-sync its widget. */
+    private static OptionInstance<Boolean> lastFgSyncInstance;
+
+    /** Cap slider from the most recent mainOptions() build; lets the screen re-sync its widget. */
+    private static OptionInstance<Double> lastFpsCapInstance;
+
+    /** Set by {@link CausticaOptionsScreen} while it is open so FG-related listeners can refresh the cap row live. */
+    private static Runnable uiRefresh;
+
+    /** True while the widget models are being built or programmatically synced; suppresses listener side effects. */
+    private static boolean buildingOptions;
+
+    /** True while the cap slider's model is being written programmatically (not by the user). */
+    private static boolean syncingCapDisplay;
+
+    public static OptionInstance<Boolean> fgSyncOption() {
+        return lastFgSyncInstance;
+    }
+
+    public static OptionInstance<Double> fpsCapOption() {
+        return lastFpsCapInstance;
+    }
+
+    static void setUiRefresh(Runnable refresh) {
+        uiRefresh = refresh;
+    }
+
+    private static void requestUiRefresh() {
+        Runnable refresh = uiRefresh;
+        if (!buildingOptions && refresh != null) {
+            refresh.run();
+        }
+    }
+
+    /**
+     * The cap value the slider should display right now: the exact synced rate while FG Sync is on and
+     * Frame Generation enabled (the slider is locked then), the unlimited sentinel while FG Sync is on
+     * but FG is off (matching the uncapped fallback in {@code RtFpsCap}), and otherwise the manual
+     * setting. Display only — pacing reads the live value in {@code RtFpsCap}.
+     */
+    private static double currentDisplayCap() {
+        if (CausticaConfig.Rt.SYNC_FRAME_CAP.value()) {
+            if (CausticaConfig.Rt.Fg.ENABLED.value()) {
+                int refreshRate = Minecraft.getInstance().getWindow().getRefreshRate();
+                if (refreshRate > 0) {
+                    return refreshRate / (double) (CausticaConfig.Rt.Fg.MULTI_FRAME_COUNT.value() + 1);
+                }
+            }
+            return 260.0;
+        }
+        return CausticaConfig.Rt.FPS_CAP.value();
+    }
+
+    /** Writes the current display cap into the slider model without triggering the manual-override path. */
+    static void syncCapDisplayValue() {
+        OptionInstance<Double> option = lastFpsCapInstance;
+        if (option == null) {
+            return;
+        }
+        syncingCapDisplay = true;
+        try {
+            option.set(currentDisplayCap());
+        } finally {
+            syncingCapDisplay = false;
+        }
+    }
+
     private static ResetableOption pathTracingEnabled() {
         BooleanSetting setting = CausticaConfig.Rt.ENABLED;
         boolean factoryDefault = setting.defaultValue();
@@ -330,6 +426,9 @@ public final class RtVideoOptions {
                     // changes that requirement, so rebuild the swapchain at the next safe boundary (same
                     // path HDR uses).
                     Minecraft.getInstance().invalidateSurfaceConfiguration();
+                    warnFgAutoReflexUnavailable();
+                    // The synced cap shown below derives from this toggle.
+                    requestUiRefresh();
                 }
             });
         option.set(setting.value());
@@ -353,10 +452,66 @@ public final class RtVideoOptions {
                     // multiplier change must recreate the swapchain or higher multipliers silently cap back
                     // to 2x (see VulkanGpuSurfaceMixin#caustica$raiseSwapchainImageCount).
                     Minecraft.getInstance().invalidateSurfaceConfiguration();
+                    // The synced cap shown below derives from this multiplier.
+                    requestUiRefresh();
                 }
             });
         option.set(Math.clamp(setting.value(), 1, 5));
         return new ResetableOption(option, factoryDefault);
+    }
+
+    private static ResetableOption dlssFgForceFifo() {
+        BooleanSetting setting = CausticaConfig.Rt.Fg.FORCE_FIFO_PRESENT;
+        boolean factoryDefault = setting.defaultValue();
+        OptionInstance<Boolean> option = OptionInstance.createBoolean(
+            "caustica.options.rt.dlssFgForceFifo",
+            OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.dlssFgForceFifo.tooltip")),
+            factoryDefault,
+            forceFifo -> {
+                if (setting.value() != forceFifo) {
+                    setting.set(forceFifo);
+                    // The present mode is fixed at swapchain creation, so the override only takes effect
+                    // on a rebuild — same invalidation path the FG toggle and multiplier use.
+                    Minecraft.getInstance().invalidateSurfaceConfiguration();
+                }
+            });
+        option.set(setting.value());
+        return new ResetableOption(option, factoryDefault);
+    }
+
+    private static ResetableOption dlssFgAutoReflex() {
+        BooleanSetting setting = CausticaConfig.Rt.Fg.AUTO_REFLEX;
+        boolean factoryDefault = setting.defaultValue();
+        OptionInstance<Boolean> option = OptionInstance.createBoolean(
+            "caustica.options.rt.dlssFgAutoReflex",
+            OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.dlssFgAutoReflex.tooltip")),
+            factoryDefault,
+            autoReflex -> {
+                if (setting.value() != autoReflex) {
+                    setting.set(autoReflex);
+                    // The driver sleep mode is configured per swapchain (and only ever switched on), so
+                    // rebuild to either apply it on a fresh swapchain or let a fresh one start without it.
+                    Minecraft.getInstance().invalidateSurfaceConfiguration();
+                    warnFgAutoReflexUnavailable();
+                }
+            });
+        option.set(setting.value());
+        return new ResetableOption(option, factoryDefault);
+    }
+
+    /**
+     * FG's auto-Reflex linkage can only take effect when {@code VK_NV_low_latency2} was enabled at device
+     * creation — a mid-session enable with the extension absent silently does nothing until restart, so
+     * surface that instead of letting the user believe Reflex is pacing the FG queue.
+     */
+    private static void warnFgAutoReflexUnavailable() {
+        if (CausticaConfig.Rt.Fg.ENABLED.value()
+                && CausticaConfig.Rt.Fg.AUTO_REFLEX.value()
+                && !CausticaConfig.Rt.Reflex.ENABLED.value()
+                && !RtDeviceBringup.reflexEnabled()) {
+            CausticaMod.LOGGER.warn("DLSS-FG: auto-Reflex cannot engage — VK_NV_low_latency2 was not enabled at "
+                    + "device creation; restart the game with Frame Generation on to let it pace the FG queue");
+        }
     }
 
     private static ResetableOption reflexEnabled() {
@@ -365,6 +520,80 @@ public final class RtVideoOptions {
 
     private static ResetableOption reflexBoost() {
         return boolResetable("caustica.options.rt.reflexBoost", CausticaConfig.Rt.Reflex.LOW_LATENCY_BOOST);
+    }
+
+    /**
+     * FG Sync: locks the render-rate cap to refresh rate ÷ Frame Generation multiplier (160 Hz at 3x →
+     * 53.333) while FG is presenting, keeping rendered frames on whole vblank multiples; frames without
+     * FG running are uncapped. The cap slider below is display-only (locked) while this is on; turning
+     * this off also clears the manual cap to Unlimited — the manual value was unreachable while synced,
+     * so any stored one predates the toggle — and the slider can then be dragged for a manual cap.
+     */
+    private static ResetableOption fgSync() {
+        BooleanSetting setting = CausticaConfig.Rt.SYNC_FRAME_CAP;
+        boolean factoryDefault = setting.defaultValue();
+        OptionInstance<Boolean> option = OptionInstance.createBoolean(
+            "caustica.options.rt.fgSync",
+            OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.fgSync.tooltip")),
+            factoryDefault,
+            value -> {
+                if (setting.value() != value) {
+                    setting.set(value);
+                    if (!value) {
+                        // Turning sync off means "no cap": a stored manual value was unreachable while
+                        // synced and is therefore stale (the pre-lock UI could silently leave one
+                        // behind), so clear it instead of resurrecting it as a hidden cap.
+                        CausticaConfig.Rt.FPS_CAP.set(CausticaConfig.Rt.FPS_CAP.defaultValue());
+                    }
+                    requestUiRefresh();
+                }
+            });
+        option.set(setting.value());
+        lastFgSyncInstance = option;
+        return new ResetableOption(option, factoryDefault);
+    }
+
+    /**
+     * Fractional render-rate cap (0.1 fps steps) with vanilla Max Framerate semantics — it caps the
+     * render loop, so Frame Generation multiplies on top: at 6x, a cap of 26.7 still presents ~160 fps.
+     * A present-count limiter like RTSS cannot express that (it would clamp the generated frames too).
+     * Uses vanilla's own slider mapping trick (integer slider positions xmapped to fractions) and the
+     * slider maximum (260.0) doubles as the unlimited sentinel, shown via vanilla's own "Unlimited"
+     * label. The widget is locked (display only) while FG Sync is on and mirrors the derived rate;
+     * pacing reads the live value in {@code RtFpsCap}. Composes with vanilla's Max Framerate: both wait
+     * at frame end, so the lower cap wins.
+     */
+    private static ResetableOption fpsCap() {
+        FloatSetting setting = CausticaConfig.Rt.FPS_CAP;
+        float factoryDefault = setting.defaultValue();
+        OptionInstance<Double> option = new OptionInstance<>(
+                "caustica.options.rt.fpsCap",
+                OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.fpsCap.tooltip")),
+                (caption, fps) -> Options.genericValueLabel(caption,
+                        CausticaConfig.Rt.SYNC_FRAME_CAP.value() && CausticaConfig.Rt.Fg.ENABLED.value()
+                                ? Component.literal(String.format(Locale.ROOT, "%.3f fps", fps))
+                                : fps >= 260.0
+                                        ? Component.translatable("options.framerateLimit.max")
+                                        : Component.literal(String.format(Locale.ROOT, "%.1f fps", fps))),
+                new OptionInstance.IntRange(100, 2600).xmap(
+                        slider -> slider / 10.0,
+                        fps -> (int) Math.round(fps * 10.0),
+                        true),
+                (double) factoryDefault,
+                fps -> {
+                    if (syncingCapDisplay) {
+                        return;
+                    }
+                    setting.set(fps.floatValue());
+                });
+        syncingCapDisplay = true;
+        try {
+            option.set(currentDisplayCap());
+        } finally {
+            syncingCapDisplay = false;
+        }
+        lastFpsCapInstance = option;
+        return new ResetableOption(option, (double) factoryDefault);
     }
 
     private static ResetableOption hdrEnabled() {

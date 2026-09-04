@@ -1,6 +1,7 @@
 package dev.comfyfluffy.caustica.client;
 
 import dev.comfyfluffy.caustica.CausticaConfig;
+import net.minecraft.client.OptionInstance;
 import net.minecraft.client.Options;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractWidget;
@@ -11,9 +12,8 @@ import net.minecraft.network.chat.Component;
 
 /**
  * The Caustica-DLSS options window, opened by the mod's keybinding (default K). The main menu shows
- * the core RT controls (exposure, sampling, toggles, DLSS) each with its own reset button, and a
- * "细节调整" (Detail Tuning) button at the bottom that opens the {@link CausticaDetailOptionsScreen}
- * submenu for the artistic tuning knobs.
+ * the core RT controls (exposure, sampling, toggles, DLSS) each with its own reset button, and submenu
+ * buttons for Frame Generation, Detail Tuning, and Water Detail.
  *
  * <p>The backdrop is fully transparent: {@link #extractBackground} skips the vanilla blur and
  * dark-menu-background passes so the game view shows straight through the window. This is deliberate —
@@ -25,9 +25,15 @@ import net.minecraft.network.chat.Component;
  */
 public class CausticaOptionsScreen extends OptionsSubScreen {
     /** Width of the per-option reset button; deliberately narrower than a vanilla control. */
-    private static final int RESET_WIDTH = 50;
+    protected static final int RESET_WIDTH = 50;
 
     private final Screen parentScreen;
+
+    /** The cap slider's widget from {@link #addOptions}; kept so FG Sync can lock/unlock it live. */
+    protected AbstractWidget fpsCapControl;
+
+    /** The cap slider's reset button from {@link #addOptions}; kept so FG Sync can lock/unlock it live. */
+    protected Button fpsCapReset;
 
     public CausticaOptionsScreen(Screen lastScreen, Options options) {
         this(lastScreen, options, Component.translatable("caustica.options.title"));
@@ -45,6 +51,11 @@ public class CausticaOptionsScreen extends OptionsSubScreen {
     @Override
     protected void addOptions() {
         this.list.addHeader(Component.translatable("caustica.options.rt.header"));
+        // FG submenu button is first
+        this.list.addBig(Button.builder(
+                Component.translatable("caustica.options.fg.open"),
+                button -> this.minecraft.gui.setScreen(new CausticaFgOptionsScreen(this, this.options)))
+                .build());
         this.list.addBig(Button.builder(
                 Component.translatable("caustica.options.detail.open"),
                 button -> this.minecraft.gui.setScreen(new CausticaDetailOptionsScreen(this, this.options)))
@@ -86,6 +97,10 @@ public class CausticaOptionsScreen extends OptionsSubScreen {
                 .width(RESET_WIDTH)
                 .build();
         reset.active = !disabled;
+        if (row.option() == RtVideoOptions.fpsCapOption()) {
+            this.fpsCapControl = control;
+            this.fpsCapReset = reset;
+        }
         this.list.addSmall(control, row.option(), reset);
     }
 
@@ -99,6 +114,8 @@ public class CausticaOptionsScreen extends OptionsSubScreen {
 
     @Override
     public void removed() {
+        // Drop the live-refresh hook before the screen goes away so listeners can't touch a dead list.
+        RtVideoOptions.setUiRefresh(null);
         // OptionsSubScreen.removed() saves vanilla Options; Caustica settings live in their own
         // TOML file, so persist those here on the same close.
         try {
