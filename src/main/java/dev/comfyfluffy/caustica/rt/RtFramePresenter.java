@@ -51,13 +51,33 @@ import java.nio.LongBuffer;
 public final class RtFramePresenter {
     public static final RtFramePresenter INSTANCE = new RtFramePresenter();
 
-    private static final long ACQUIRE_TIMEOUT_NS = 5_000_000_000L;
+    // A healthy acquire returns within a few vblanks — FIFO paces one swapchain image per refresh, so the
+    // worst legitimate wait is roughly the multiplier's worth of refreshes. Waiting far beyond that means the
+    // presentation engine stopped recycling images; capping the block at 250ms turns a wedged frame into a
+    // visible stutter instead of the 5s stall that read as 0fps, and lets this class degrade (present fewer
+    // generated frames, or none) instead of freezing the render thread.
+    private static final long ACQUIRE_TIMEOUT_NS = 250_000_000L;
 
     private static final long LOG_INTERVAL_NS = 1_000_000_000L;
+
+    private static final long ACQUIRE_FAILURE_LOG_INTERVAL_NS = 2_000_000_000L;
+
+    // Consecutive fully-timed-out frames before multi-frame pacing is declared unavailable (~5s of trying at
+    // 250ms each). After that the presenter stops requesting extra images so the game returns to full speed
+    // instead of stuttering indefinitely.
+    private static final int PACING_DISABLE_FRAMES = 20;
 
     private long[] acquireSemaphores = new long[0];
     private int acquireCursor;
     private boolean failed;
+
+    // Set after PACING_DISABLE_FRAMES consecutive frames where every extra-image acquire timed out: the
+    // presentation engine cannot recycle images at the multi-frame rate, so extra presents can't be paced.
+    // Gates only generatedCount > 1 — 2x paces through the normal present path and stays available; selecting
+    // 2x clears the flag so multi-frame can be retried without a restart.
+    private boolean multiFramePacingBroken;
+    private int allTimeoutStreak;
+    private long lastAcquireFailureLogNs;
 
     // Frames acquired + recorded this frame, awaiting present at present() HEAD (after MC's submit flush).
     private int[] pendingImageIndex = new int[0];
@@ -71,6 +91,9 @@ public final class RtFramePresenter {
     private int generatedFramesInWindow;
     private int interpOkInWindow;
     private int interpFallbackInWindow;
+    private long acquireWaitNsInWindow;
+    private int acquireTimeoutsInWindow;
+    private long prepareNsInWindow;
 
     private RtFramePresenter() {
     }
@@ -78,7 +101,8 @@ public final class RtFramePresenter {
     /** Whether FG extra-present should run this frame (enabled, available, in a world). */
     public boolean isActive() {
         return !failed && RtDlssFg.enabled() && RtDlssFg.INSTANCE.isAvailable()
-                && Minecraft.getInstance().level != null;
+                && Minecraft.getInstance().level != null
+                && (!multiFramePacingBroken || RtDlssFg.INSTANCE.effectiveMultiFrameCount() <= 1);
     }
 
     /**
@@ -100,6 +124,22 @@ public final class RtFramePresenter {
         if (failed || swapchain == 0L || srcImage == 0L || generatedCount <= 0) {
             return;
         }
+        if (generatedCount <= 1) {
+            multiFramePacingBroken = false; // single-frame generation paces through the normal present path
+        }
+        // Two images are never acquirable mid-frame: Minecraft's current image, and the one the
+        // presentation engine holds for scanout — under FIFO it only releases that image when a later
+        // queued present replaces it, and with an empty queue it holds it indefinitely. Requesting past
+        // this bound is what stalls the render thread one full acquire timeout per frame.
+        int acquirable = swapchainImages.size() - 2;
+        if (generatedCount > acquirable) {
+            generatedCount = acquirable;
+        }
+        if (generatedCount <= 0) {
+            return;
+        }
+        long prepareStartNs = System.nanoTime();
+        boolean anyAcquireTimeout = false;
         try {
             ensureCapacity(device, swapchainImages.size() + 1, generatedCount);
             for (int i = 0; i < generatedCount; i++) {
@@ -123,8 +163,15 @@ public final class RtFramePresenter {
                 int imageIndex;
                 try (MemoryStack stack = MemoryStack.stackPush()) {
                     IntBuffer pIndex = stack.callocInt(1);
+                    long waitStartNs = System.nanoTime();
                     int r = KHRSwapchain.vkAcquireNextImageKHR(device.vkDevice(), swapchain, ACQUIRE_TIMEOUT_NS, acquireSem, 0L, pIndex);
+                    acquireWaitNsInWindow += System.nanoTime() - waitStartNs;
                     if (r != VK10.VK_SUCCESS && r != 1000001003 /* SUBOPTIMAL */) {
+                        if (r == VK10.VK_TIMEOUT) {
+                            anyAcquireTimeout = true;
+                            acquireTimeoutsInWindow++;
+                        }
+                        logAcquireFailure(r, generatedCount);
                         return; // out-of-date/timeout: present what we have, let MC recover
                     }
                     imageIndex = pIndex.get(0);
@@ -141,6 +188,39 @@ public final class RtFramePresenter {
             failed = true;
             pendingCount = 0;
             CausticaMod.LOGGER.error("DLSS-FG present-record failed; frame generation disabled", t);
+        } finally {
+            prepareNsInWindow += System.nanoTime() - prepareStartNs;
+            // Degradation ladder: a frame where every extra-image acquire timed out means the presentation
+            // engine released nothing back. A single such frame just presents fewer generated images (the
+            // early return above); only a long unbroken streak suspends multi-frame presents entirely.
+            if (anyAcquireTimeout && pendingCount == 0) {
+                if (++allTimeoutStreak >= PACING_DISABLE_FRAMES) {
+                    multiFramePacingBroken = true;
+                    CausticaMod.LOGGER.error("DLSS-FG: extra-image acquire timed out on {} consecutive frames "
+                            + "({}x) — the presentation engine is not recycling swapchain images at that rate; "
+                            + "multi-frame presents suspended until 2x is selected",
+                            allTimeoutStreak, generatedCount + 1);
+                }
+            } else {
+                allTimeoutStreak = 0;
+            }
+        }
+    }
+
+    /** Rate-limited WARN for a failed extra-image acquire, distinguishing a pacing timeout from other codes. */
+    private void logAcquireFailure(int result, int generatedCount) {
+        long now = System.nanoTime();
+        if (now - lastAcquireFailureLogNs < ACQUIRE_FAILURE_LOG_INTERVAL_NS) {
+            return;
+        }
+        lastAcquireFailureLogNs = now;
+        if (result == VK10.VK_TIMEOUT) {
+            CausticaMod.LOGGER.warn("DLSS-FG: vkAcquireNextImageKHR timed out after {}ms — presentation engine "
+                    + "not recycling swapchain images (pacing stall); presenting {} of {} generated frame(s) this frame",
+                    ACQUIRE_TIMEOUT_NS / 1_000_000, pendingCount, generatedCount);
+        } else {
+            CausticaMod.LOGGER.warn("DLSS-FG: vkAcquireNextImageKHR failed with result {} — presenting {} of {} "
+                    + "generated frame(s) this frame", result, pendingCount, generatedCount);
         }
     }
 
@@ -175,10 +255,11 @@ public final class RtFramePresenter {
     }
 
     /**
-     * Debug diagnostic (2026-07-01): tracks real vs generated {@code vkQueuePresentKHR} calls per second,
-     * separate from MC's own fps counter — that counter only reflects simulated/rendered frames
-     * (blitFromTexture calls), so it would NOT show an increase from FG's extra presents even if the display
-     * is genuinely receiving more frames. Logged only when {@code caustica.rt.fg} is enabled.
+     * Present pacing diagnostics, logged once per second while {@code caustica.rt.fg} is enabled: real vs
+     * generated {@code vkQueuePresentKHR} calls (MC's own fps counter only counts rendered frames, so it can't
+     * show FG's extra presents), plus the generated-frame acquire wait/timeout totals and total
+     * {@link #prepareExtraFrames} time. Those separate a present-pacing stall (acquireWait/acquireTimeouts
+     * climb while prepare time stays flat) from a slow interpolation/record stage (prepareMs climbs instead).
      */
     private void logPresentRate(int generatedThisFrame) {
         realFramesInWindow++;
@@ -197,15 +278,19 @@ public final class RtFramePresenter {
         double totalFps = (realFramesInWindow + generatedFramesInWindow) / seconds;
         CausticaMod.LOGGER.info(
                 "[FG present-rate] real={} gen={} realFps={} totalPresentFps={} configuredMultiFrameCount={} "
-                        + "interpOk={} interpFallbackDuplicate={}",
+                        + "interpOk={} interpFallbackDuplicate={} prepareMs={} acquireWaitMs={} acquireTimeouts={}",
                 realFramesInWindow, generatedFramesInWindow,
                 String.format("%.1f", realFps), String.format("%.1f", totalFps),
-                RtDlssFg.INSTANCE.effectiveMultiFrameCount(), interpOkInWindow, interpFallbackInWindow);
+                RtDlssFg.INSTANCE.effectiveMultiFrameCount(), interpOkInWindow, interpFallbackInWindow,
+                prepareNsInWindow / 1_000_000, acquireWaitNsInWindow / 1_000_000, acquireTimeoutsInWindow);
         logWindowStartNs = now;
         realFramesInWindow = 0;
         generatedFramesInWindow = 0;
         interpOkInWindow = 0;
         interpFallbackInWindow = 0;
+        acquireWaitNsInWindow = 0L;
+        acquireTimeoutsInWindow = 0;
+        prepareNsInWindow = 0L;
     }
 
     private void recordBlit(VulkanCommandEncoder enc, long srcImage, long dstImage, int copyW, int copyH,

@@ -23,6 +23,7 @@ import org.lwjgl.vulkan.VkDevice;
 import org.lwjgl.vulkan.VkPresentIdKHR;
 import org.lwjgl.vulkan.VkPresentInfoKHR;
 import org.lwjgl.vulkan.VkQueue;
+import org.lwjgl.vulkan.VkSurfaceCapabilitiesKHR;
 import org.lwjgl.vulkan.VkSurfaceFormatKHR;
 import org.lwjgl.vulkan.VkSwapchainCreateInfoKHR;
 import org.lwjgl.vulkan.VkSwapchainLatencyCreateInfoNV;
@@ -101,6 +102,9 @@ public abstract class VulkanGpuSurfaceMixin {
 
 	@Unique
 	private int caustica$colorSpace = 0;
+
+	@Unique
+	private int caustica$effectivePresentMode = -1;
 
 	@Unique
 	private long caustica$metadataSwapchain;
@@ -213,10 +217,86 @@ public abstract class VulkanGpuSurfaceMixin {
 	/** Replace the hardcoded {@code imageColorSpace(0)} with the PQ color space when one was selected. */
 	@ModifyArg(method = "configure",
 			at = @At(value = "INVOKE",
-					target = "Lorg/lwjgl/vulkan/VkSwapchainCreateInfoKHR;imageColorSpace(I)Lorg/lwjgl/vulkan/VkSwapchainCreateInfoKHR;"),
+				target = "Lorg/lwjgl/vulkan/VkSwapchainCreateInfoKHR;imageColorSpace(I)Lorg/lwjgl/vulkan/VkSwapchainCreateInfoKHR;"),
 			index = 0)
 	private int caustica$overrideColorSpace(int original) {
 		return this.caustica$colorSpace != 0 ? this.caustica$colorSpace : original;
+	}
+
+	/**
+	 * Force FIFO when multi-frame generation (3x+) is active. The driver paces MFG's queued presents with
+	 * hardware flip metering on Blackwell; on Ada that hardware doesn't exist, and with a non-pacing mode
+	 * (IMMEDIATE/MAILBOX) the presentation engine holds a swapchain image indefinitely waiting for scanout
+	 * timing that never arrives — the second generated-frame acquire then times out on every frame and the
+	 * game drops to one frame per acquire timeout. FIFO's vblank contract (one queued image consumed and one
+	 * acquired image released per refresh) is the software pacing the MFG path needs, and Vulkan guarantees
+	 * FIFO support on every surface. 2x keeps the user's present mode: single-frame generation paces fine
+	 * without it.
+	 */
+	@ModifyArg(method = "configure",
+			at = @At(value = "INVOKE",
+				target = "Lorg/lwjgl/vulkan/VkSwapchainCreateInfoKHR;presentMode(I)Lorg/lwjgl/vulkan/VkSwapchainCreateInfoKHR;"),
+			index = 0)
+	private int caustica$forceFifoForMultiFrame(int original) {
+		int effective = original;
+		if (original != KHRSurface.VK_PRESENT_MODE_FIFO_KHR
+				&& CausticaConfig.Rt.Fg.ENABLED.value()
+				&& CausticaConfig.Rt.Fg.MULTI_FRAME_COUNT.value() > 1) {
+			effective = KHRSurface.VK_PRESENT_MODE_FIFO_KHR;
+			CausticaMod.LOGGER.info("DLSS-FG: multi-frame ({}x) requires FIFO pacing — overriding present mode {} -> FIFO",
+					CausticaConfig.Rt.Fg.MULTI_FRAME_COUNT.value() + 1, caustica$presentModeName(original));
+		}
+		caustica$effectivePresentMode = effective;
+		return effective;
+	}
+
+	@Unique
+	private static String caustica$presentModeName(int mode) {
+		if (mode == KHRSurface.VK_PRESENT_MODE_FIFO_KHR) {
+			return "FIFO";
+		}
+		if (mode == KHRSurface.VK_PRESENT_MODE_MAILBOX_KHR) {
+			return "MAILBOX";
+		}
+		if (mode == KHRSurface.VK_PRESENT_MODE_IMMEDIATE_KHR) {
+			return "IMMEDIATE";
+		}
+		if (mode == KHRSurface.VK_PRESENT_MODE_FIFO_RELAXED_KHR) {
+			return "FIFO_RELAXED";
+		}
+		return "UNKNOWN(" + mode + ")";
+	}
+
+	/**
+	 * Frame Generation presents {@code generatedCount} generated images plus the real frame in one present
+	 * cycle, so the swapchain needs {@code generatedCount + 1} images — plus one more: the presentation
+	 * engine always holds the image currently being scanned out and only releases it when a later queued
+	 * present replaces it (with an empty queue it holds it indefinitely). At exactly {@code generatedCount
+	 * + 1} images, mid-frame only {@code generatedCount - 1} are acquirable, so the last generated-frame
+	 * acquire of every frame waits a full acquire timeout and the render thread drops to one frame per
+	 * timeout. Raise the requested minimum, clamped to what the surface reports, so every extra acquire
+	 * returns instantly.
+	 */
+	@Unique
+	private void caustica$raiseSwapchainImageCount(VkSwapchainCreateInfoKHR info) {
+		if (!CausticaConfig.Rt.Fg.ENABLED.value()) {
+			return;
+		}
+		int generated = Math.clamp(CausticaConfig.Rt.Fg.MULTI_FRAME_COUNT.value(), 1, 5);
+		int needed = generated + 2;
+		try (MemoryStack stack = MemoryStack.stackPush()) {
+			VkSurfaceCapabilitiesKHR caps = VkSurfaceCapabilitiesKHR.calloc(stack);
+			if (KHRSurface.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+					this.device.vkDevice().getPhysicalDevice(), this.surface, caps) == VK10.VK_SUCCESS) {
+				needed = Math.max(needed, caps.minImageCount());
+				if (caps.maxImageCount() > 0) {
+					needed = Math.min(needed, caps.maxImageCount());
+				}
+			}
+		}
+		if (info.minImageCount() < needed) {
+			info.minImageCount(needed);
+		}
 	}
 
 	/**
@@ -235,6 +315,7 @@ public abstract class VulkanGpuSurfaceMixin {
 					target = "Lorg/lwjgl/vulkan/KHRSwapchain;vkCreateSwapchainKHR(Lorg/lwjgl/vulkan/VkDevice;Lorg/lwjgl/vulkan/VkSwapchainCreateInfoKHR;Lorg/lwjgl/vulkan/VkAllocationCallbacks;Ljava/nio/LongBuffer;)I"))
 	private int caustica$createSwapchainWithReflex(VkDevice device, VkSwapchainCreateInfoKHR pCreateInfo,
 			VkAllocationCallbacks pAllocator, LongBuffer pSwapchain) {
+		caustica$raiseSwapchainImageCount(pCreateInfo);
 		if (!RtDeviceBringup.reflexEnabled()) {
 			return KHRSwapchain.vkCreateSwapchainKHR(device, pCreateInfo, pAllocator, pSwapchain);
 		}
@@ -259,16 +340,29 @@ public abstract class VulkanGpuSurfaceMixin {
 		if (RtDeviceBringup.reflexEnabled()) {
 			RtReflex.INSTANCE.applySleepMode(this.device.vkDevice(), this.swapchain);
 		}
-		// DLSS-FG diagnostic: MAILBOX/IMMEDIATE present modes let a later present silently replace/skip an
-		// earlier queued-but-not-yet-scanned-out one, which would drop FG's generated frame before the
-		// display ever shows it — even though our vkQueuePresentKHR call itself reports success. FIFO is the
-		// only mode that guarantees every queued present gets its own vblank. Log once per (re)configure so
-		// this is checkable without guessing at the in-game V-Sync setting.
+		// DLSS-FG diagnostic: log the mode the swapchain was actually created with (the FIFO override above may
+		// differ from what the Configuration requested). FIFO's vblank contract is what paces generated frames
+		// — one queued image consumed per refresh; in a non-FIFO mode a later present can silently replace a
+		// queued generated frame before the display ever shows it. Logged once per (re)configure.
 		if (dev.comfyfluffy.caustica.rt.pipeline.RtDlssFg.enabled()) {
-			CausticaMod.LOGGER.info("DLSS-FG: swapchain present mode = {} (FIFO required for generated frames "
-					+ "to actually display; MAILBOX/IMMEDIATE will silently drop them — enable V-Sync if not FIFO)",
-					config.presentMode());
+			int mode = caustica$effectivePresentMode >= 0 ? caustica$effectivePresentMode
+					: caustica$vkPresentMode(config.presentMode());
+			CausticaMod.LOGGER.info("DLSS-FG: swapchain created with present mode {} and {} image(s) — {}",
+					caustica$presentModeName(mode), this.swapchainImages.size(),
+					mode == KHRSurface.VK_PRESENT_MODE_FIFO_KHR
+							? "vblank-paced, generated frames display in order"
+							: "non-FIFO modes can silently replace queued generated frames");
 		}
+	}
+
+	@Unique
+	private static int caustica$vkPresentMode(GpuSurface.PresentMode mode) {
+		return switch (mode) {
+			case IMMEDIATE -> KHRSurface.VK_PRESENT_MODE_IMMEDIATE_KHR;
+			case MAILBOX -> KHRSurface.VK_PRESENT_MODE_MAILBOX_KHR;
+			case FIFO -> KHRSurface.VK_PRESENT_MODE_FIFO_KHR;
+			case FIFO_RELAXED -> KHRSurface.VK_PRESENT_MODE_FIFO_RELAXED_KHR;
+		};
 	}
 
 	/**

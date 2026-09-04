@@ -317,7 +317,23 @@ public final class RtVideoOptions {
     }
 
     private static ResetableOption dlssFgEnabled() {
-        return boolResetable("caustica.options.rt.dlssFg", CausticaConfig.Rt.Fg.ENABLED);
+        BooleanSetting setting = CausticaConfig.Rt.Fg.ENABLED;
+        boolean factoryDefault = setting.defaultValue();
+        OptionInstance<Boolean> option = OptionInstance.createBoolean(
+            "caustica.options.rt.dlssFg",
+            OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.dlssFg.tooltip")),
+            factoryDefault,
+            enabled -> {
+                if (setting.value() != enabled) {
+                    setting.set(enabled);
+                    // Frame Generation needs the swapchain to hold generatedCount+1 images; toggling it
+                    // changes that requirement, so rebuild the swapchain at the next safe boundary (same
+                    // path HDR uses).
+                    Minecraft.getInstance().invalidateSurfaceConfiguration();
+                }
+            });
+        option.set(setting.value());
+        return new ResetableOption(option, factoryDefault);
     }
 
     private static ResetableOption dlssFgMultiFrame() {
@@ -330,7 +346,15 @@ public final class RtVideoOptions {
                     Component.literal((count + 1) + "x")),
             new OptionInstance.IntRange(1, 5),
             factoryDefault,
-            setting::set);
+            count -> {
+                if (setting.value() != count) {
+                    setting.set(count);
+                    // The swapchain image count is sized from this multiplier at creation time; a live
+                    // multiplier change must recreate the swapchain or higher multipliers silently cap back
+                    // to 2x (see VulkanGpuSurfaceMixin#caustica$raiseSwapchainImageCount).
+                    Minecraft.getInstance().invalidateSurfaceConfiguration();
+                }
+            });
         option.set(Math.clamp(setting.value(), 1, 5));
         return new ResetableOption(option, factoryDefault);
     }

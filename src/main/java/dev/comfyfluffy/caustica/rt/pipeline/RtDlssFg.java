@@ -56,10 +56,12 @@ public final class RtDlssFg {
         return multiFrameCountMax;
     }
 
-    /** Requested generated-frame count clamped to the driver maximum (>=1 once available). */
+    /** Requested generated-frame count clamped to the driver maximum. A zero/unset maximum (driver
+     * reports no multi-frame capacity, or has not probed yet) is treated as 2x-only rather than
+     * falling through to the raw request, which would drive the present loop past the swapchain. */
     public int effectiveMultiFrameCount() {
         int requested = CausticaConfig.Rt.Fg.MULTI_FRAME_COUNT.value();
-        return multiFrameCountMax > 0 ? Math.clamp(requested, 1, multiFrameCountMax) : requested;
+        return Math.clamp(requested, 1, Math.max(1, multiFrameCountMax));
     }
 
     public boolean isReady() {
@@ -96,7 +98,19 @@ public final class RtDlssFg {
             return;
         }
         available = l.dlssgAvailable();
+        int archGateSites = l.patchDlssgArchGate();
         multiFrameCountMax = l.dlssgMultiFrameCountMax();
+        if (archGateSites > 0) {
+            CausticaMod.LOGGER.info("DLSS frame generation multi-frame unlock: {} arch-gate site(s) rewritten", archGateSites);
+        }
+        if (l.hasDlssgMidpoint()) {
+            int midpointSlots = l.patchDlssgMidpoint();
+            if (midpointSlots > 0) {
+                CausticaMod.LOGGER.info("DLSS frame generation temporal (midpoint) correction: {} descriptor(s) redirected", midpointSlots);
+            } else {
+                CausticaMod.LOGGER.warn("DLSS frame generation temporal (midpoint) correction not applied: {}", l.dlssgMidpointDetail());
+            }
+        }
         CausticaMod.LOGGER.info("DLSS Frame Generation available: {} (multi-frame max {})", available, multiFrameCountMax);
     }
 
