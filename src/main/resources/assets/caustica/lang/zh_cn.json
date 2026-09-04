@@ -3,7 +3,8 @@
 		"key.caustica.openOptions": "打开 Caustica-DLSS 选项",
 		"caustica.options.reset": "重置",
 		"caustica.options.fg.open": "DLSS插帧-支持40系",
-		"caustica.options.fg.title": "DLSS插帧-支持40系",
+			"caustica.options.fg.open.tooltip": "如遇到卡顿请关闭NVIDIA APP 的G-sync",
+			"caustica.options.fg.title": "DLSS插帧-支持40系",
 		"caustica.options.fg.header": "DLSS插帧-支持40系",
 		"caustica.options.detail.open": "细节调整",
 	"caustica.options.detail.title": "细节调整",
@@ -37,9 +38,12 @@
 	"caustica.options.rt.glow.tooltip": "为发光实体绘制原版发光效果轮廓（可穿墙显示）。",
 
 	"caustica.options.rt.waterWaves": "动态水面",
-	"caustica.options.rt.waterWaves.tooltip": "对水面法线进行动画处理，以显示移动波浪高光。",
+		"caustica.options.rt.waterWaves.tooltip": "对水面法线进行动画处理，以显示移动波浪高光。",
 
-	"caustica.options.rt.hdr": "HDR 输出",
+		"caustica.options.rt.blockOutlineNeon": "霓虹方块轮廓",
+		"caustica.options.rt.blockOutlineNeon.tooltip": "让方块选取框的轮廓颜色在 HSL 色轮上循环，产生霓虹变色动画效果。",
+
+		"caustica.options.rt.hdr": "HDR 输出",
 	"caustica.options.rt.hdr.tooltip": "当显示器支持时，以 HDR (ST.2084/PQ) 而不是 SDR 显示。重启游戏后生效。",
 
 	"caustica.options.rt.hdrPaperWhite": "HDR 纸白亮度",

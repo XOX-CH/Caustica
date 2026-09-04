@@ -6,6 +6,7 @@ import net.minecraft.client.Options;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.options.OptionsSubScreen;
 import net.minecraft.network.chat.Component;
@@ -52,10 +53,12 @@ public class CausticaOptionsScreen extends OptionsSubScreen {
     protected void addOptions() {
         this.list.addHeader(Component.translatable("caustica.options.rt.header"));
         // FG submenu button is first
-        this.list.addBig(Button.builder(
+        Button fgButton = Button.builder(
                 Component.translatable("caustica.options.fg.open"),
                 button -> this.minecraft.gui.setScreen(new CausticaFgOptionsScreen(this, this.options)))
-                .build());
+                .build();
+        fgButton.setTooltip(Tooltip.create(Component.translatable("caustica.options.fg.open.tooltip")));
+        this.list.addBig(fgButton);
         this.list.addBig(Button.builder(
                 Component.translatable("caustica.options.detail.open"),
                 button -> this.minecraft.gui.setScreen(new CausticaDetailOptionsScreen(this, this.options)))
