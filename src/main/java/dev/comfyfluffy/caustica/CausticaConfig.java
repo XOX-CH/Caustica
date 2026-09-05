@@ -772,6 +772,8 @@ public final class CausticaConfig {
         public static final class Overlay {
             public static final BooleanSetting BLOCK_OUTLINE_ENABLED =
                     bool("caustica.rt.blockOutline", "overlay.block-outline.enabled", true);
+            public static final BooleanSetting BLOCK_OUTLINE_NEON =
+                    bool("caustica.rt.blockOutlineNeon", "overlay.block-outline.neon", false);
 
             private Overlay() {
             }

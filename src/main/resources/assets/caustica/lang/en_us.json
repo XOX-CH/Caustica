@@ -3,7 +3,8 @@
 	"key.caustica.openOptions": "Open Caustica-DLSS Options",
 	"caustica.options.reset": "Reset",
 	"caustica.options.fg.open": "DLSS Frame Generation",
-	"caustica.options.fg.title": "DLSS Frame Generation",
+		"caustica.options.fg.open.tooltip": "If you experience stuttering, disable G-Sync in the NVIDIA App.",
+		"caustica.options.fg.title": "DLSS Frame Generation",
 	"caustica.options.fg.header": "DLSS Frame Generation",
 	"caustica.options.detail.open": "Detail Tuning",
 	"caustica.options.detail.title": "Detail Tuning",
@@ -40,9 +41,12 @@
 	"caustica.options.rt.glow.tooltip": "Draw the vanilla Glowing-effect outline (through walls) around glowing entities.",
 
 	"caustica.options.rt.waterWaves": "Animated Water",
-	"caustica.options.rt.waterWaves.tooltip": "Animate water-surface normals for moving wave highlights.",
+		"caustica.options.rt.waterWaves.tooltip": "Animate water-surface normals for moving wave highlights.",
 
-	"caustica.options.rt.hdr": "HDR Output",
+		"caustica.options.rt.blockOutlineNeon": "Neon Block Outline",
+		"caustica.options.rt.blockOutlineNeon.tooltip": "Cycle the block outline colour through the HSL hue wheel for a neon animated effect.",
+
+		"caustica.options.rt.hdr": "HDR Output",
 	"caustica.options.rt.hdr.tooltip": "Recreate the swapchain for HDR (ST.2084/PQ) or native SDR output. Applied at the next frame boundary.",
 
 	"caustica.options.rt.hdrUiBrightness": "HDR UI Brightness",

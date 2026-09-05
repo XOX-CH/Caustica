@@ -52,6 +52,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
+import java.util.Random;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -947,9 +948,15 @@ public final class RtEntities {
         if (cam == null) {
             return;
         }
-        Map<ParticleRenderType, ParticleGroup<?>> groups =
-                ((ParticleEngineAccessor) mc.particleEngine).caustica$getParticleGroups();
-        if (groups == null || groups.isEmpty()) {
+        // Check weather: rain level for procedural rain particles.
+        float rainLevel = mc.level != null ? mc.level.getRainLevel(partial) : 0f;
+        Map<ParticleRenderType, ParticleGroup<?>> groups = null;
+        try {
+            groups = ((ParticleEngineAccessor) mc.particleEngine).caustica$getParticleGroups();
+        } catch (Throwable ignored) {
+        }
+        boolean hasGroups = groups != null && !groups.isEmpty();
+        if (!hasGroups && rainLevel <= 0f) {
             particlePrev.clear();
             particleCur.clear();
             return;
@@ -957,6 +964,11 @@ public final class RtEntities {
         capture.reset();
         capture.currentAlphaBucket = RtAccel.ENTITY_BUCKET_ANY_HIT;
         particleDisp.clear();
+        if (!hasGroups) {
+            // No regular particles, but we may still have rain. Skip the regular capture loop.
+            particlePrev.clear();
+            particleCur.clear();
+        }
         // extract() emits camera-relative positions; shift them into rebased space (identity instance).
         Vec3 camPos = cam.position();
         particleCapture.setOffset((float) (camPos.x - rbx), (float) (camPos.y - rby), (float) (camPos.z - rbz));
@@ -969,46 +981,48 @@ public final class RtEntities {
         cur.clear();
         int particlesCaptured = 0;
         try {
-            particleGroups:
-            for (ParticleGroup<?> group : groups.values()) {
-                Queue<? extends Particle> queue = ((ParticleGroupAccessor) group).caustica$getParticles();
-                for (Particle p : queue) {
-                    if (build.full() || particlesCaptured >= particleLimit) {
-                        break particleGroups;
+            if (hasGroups) {
+                particleGroups:
+                for (ParticleGroup<?> group : groups.values()) {
+                    Queue<? extends Particle> queue = ((ParticleGroupAccessor) group).caustica$getParticles();
+                    for (Particle p : queue) {
+                        if (build.full() || particlesCaptured >= particleLimit) {
+                            break particleGroups;
+                        }
+                        if (!(p instanceof SingleQuadParticle sq)) {
+                            continue; // item-pickup / elder-guardian particles aren't billboard quads (skip)
+                        }
+                        if (!frustum.isVisible(p.getBoundingBox())) {
+                            continue;
+                        }
+                        int vb = capture.verts.size(), ib = capture.idx.size();
+                        int ub = capture.uvList.size(), prb = capture.prim.size(), abb = capture.alphaBuckets.size();
+                        int vertBefore = vb / 3;
+                        particleScratch.clear();
+                        sq.extract(particleScratch, cam, partial);
+                        for (SingleQuadParticle.Layer layer : particleScratch.layers()) {
+                            capture.currentTexSlot = RtEntityTextures.INSTANCE.slotForAtlas(layer.textureAtlasLocation());
+                            particleScratch.buildLayer(layer, particleCapture);
+                            particleCapture.flush();
+                        }
+                        int vertAfter = capture.verts.size() / 3;
+                        if (vertAfter == vertBefore) {
+                            continue; // nothing captured for this particle
+                        }
+                        particleCenter(vertBefore, vertAfter, particleCenterScratch);
+                        // pointInFrustum wants the world position: rebased center + rebase origin.
+                        if (!frustum.pointInFrustum(particleCenterScratch[0] + rbx, particleCenterScratch[1] + rby, particleCenterScratch[2] + rbz)) {
+                            capture.verts.size(vb); // off-screen → truncate this particle back out (clean quad boundary)
+                            capture.idx.size(ib);
+                            capture.uvList.size(ub);
+                            capture.prim.size(prb);
+                            capture.alphaBuckets.size(abb);
+                            continue;
+                        }
+                        appendParticleMv(p, particleCenterScratch, vertBefore, vertAfter, rbx, rby, rbz, cur);
+                        build.logicalCount++;
+                        particlesCaptured++;
                     }
-                    if (!(p instanceof SingleQuadParticle sq)) {
-                        continue; // item-pickup / elder-guardian particles aren't billboard quads (skip)
-                    }
-                    if (!frustum.isVisible(p.getBoundingBox())) {
-                        continue;
-                    }
-                    int vb = capture.verts.size(), ib = capture.idx.size();
-                    int ub = capture.uvList.size(), prb = capture.prim.size(), abb = capture.alphaBuckets.size();
-                    int vertBefore = vb / 3;
-                    particleScratch.clear();
-                    sq.extract(particleScratch, cam, partial);
-                    for (SingleQuadParticle.Layer layer : particleScratch.layers()) {
-                        capture.currentTexSlot = RtEntityTextures.INSTANCE.slotForAtlas(layer.textureAtlasLocation());
-                        particleScratch.buildLayer(layer, particleCapture);
-                        particleCapture.flush();
-                    }
-                    int vertAfter = capture.verts.size() / 3;
-                    if (vertAfter == vertBefore) {
-                        continue; // nothing captured for this particle
-                    }
-                    particleCenter(vertBefore, vertAfter, particleCenterScratch);
-                    // pointInFrustum wants the world position: rebased center + rebase origin.
-                    if (!frustum.pointInFrustum(particleCenterScratch[0] + rbx, particleCenterScratch[1] + rby, particleCenterScratch[2] + rbz)) {
-                        capture.verts.size(vb); // off-screen → truncate this particle back out (clean quad boundary)
-                        capture.idx.size(ib);
-                        capture.uvList.size(ub);
-                        capture.prim.size(prb);
-                        capture.alphaBuckets.size(abb);
-                        continue;
-                    }
-                    appendParticleMv(p, particleCenterScratch, vertBefore, vertAfter, rbx, rby, rbz, cur);
-                    build.logicalCount++;
-                    particlesCaptured++;
                 }
             }
         } catch (Throwable t) {
@@ -1016,6 +1030,9 @@ public final class RtEntities {
             particleDisp.clear();
             throw new RuntimeException("RT particle capture failed", t); // propagate to composite() (see entity path)
         }
+        // Add procedural rain particles when the weather is rainy. The vanilla rain pass is part of the
+        // frame graph, which is skipped when PT is active — so we generate rain here as RT particles.
+        captureRain(ctx, build, mc, partial, rbx, rby, rbz, rainLevel);
         RtFrameStats.FRAME.count("particlesCaptured", particlesCaptured);
         IdentityHashMap<Particle, ParticlePrev> oldPrev = particlePrev;
         particlePrev = cur;
@@ -1066,6 +1083,55 @@ public final class RtEntities {
         }
         prev.set(center[0], center[1], center[2], rbx, rby, rbz);
         cur.put(p, prev);
+    }
+
+    /**
+     * Generate procedural rain particles when the weather is rainy. The vanilla rain is rendered as part of
+     * the frame graph in {@link net.minecraft.client.renderer.LevelRenderer#render}, which is skipped when
+     * path tracing is active (see {@link dev.comfyfluffy.caustica.mixin.LevelRendererMixin#caustica$skipFrameGraphExecute}).
+     * Instead, we generate thin vertical quads as RT particles with {@link #PARTICLE_MASK} (primary-ray only),
+     * using the solid-white bindless slot so the rain appears as semi-transparent white streaks.
+     */
+    private void captureRain(RtContext ctx, FrameBuild build, Minecraft mc, float partial,
+                              int rbx, int rby, int rbz, float rainLevel) {
+        if (rainLevel <= 0f || build.full() || !particlesEnabled()) {
+            return;
+        }
+        int rainCount = Math.round(rainLevel * 100f);
+        if (rainCount <= 0) {
+            return;
+        }
+        capture.currentTexSlot = RtEntityTextures.INSTANCE.whiteSlot();
+        capture.currentAlphaBucket = RtAccel.ENTITY_BUCKET_ANY_HIT;
+        Vec3 camPos = mc.gameRenderer.mainCamera().position();
+        float ox = (float) (camPos.x - rbx);
+        float oy = (float) (camPos.y - rby);
+        float oz = (float) (camPos.z - rbz);
+        // Rain volume: 32 blocks horizontally, 16 blocks vertically above the camera.
+        float halfRange = 32f;
+        float height = 16f;
+        int color = 0x40FFFFFF; // semi-transparent white (25% opacity)
+        Random random = new Random();
+        for (int i = 0; i < rainCount; i++) {
+            float x = (random.nextFloat() - 0.5f) * halfRange * 2f + ox;
+            float y = random.nextFloat() * height + oy;
+            float z = (random.nextFloat() - 0.5f) * halfRange * 2f + oz;
+            float hw = 0.25f; // half-width
+            float ht = 4f;    // height
+            // Thin vertical quad: bottom-left, bottom-right, top-right, top-left.
+            capture.addVertex(x - hw, y, z, color, 0f, 0f, 0, 0xF000F0, 0f, 0f, 0f);
+            capture.addVertex(x + hw, y, z, color, 1f, 0f, 0, 0xF000F0, 0f, 0f, 0f);
+            capture.addVertex(x + hw, y + ht, z, color, 1f, 1f, 0, 0xF000F0, 0f, 0f, 0f);
+            capture.addVertex(x - hw, y + ht, z, color, 0f, 1f, 0, 0xF000F0, 0f, 0f, 0f);
+            // Zero motion vector (4 floats per vertex, 4 vertices = 16 floats).
+            for (int v = 0; v < 4; v++) {
+                particleDisp.add(0f);
+                particleDisp.add(0f);
+                particleDisp.add(0f);
+                particleDisp.add(0f);
+            }
+            build.logicalCount++;
+        }
     }
 
     /**

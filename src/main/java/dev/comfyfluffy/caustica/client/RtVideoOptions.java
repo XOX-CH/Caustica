@@ -62,6 +62,7 @@ public final class RtVideoOptions {
                 entities(),
                 particles(),
                 waterWaves(),
+                blockOutlineNeon(),
                 dlssQuality(),
                 dlssRrEnabled(),
                 dlssRrPreset(),
@@ -218,6 +219,10 @@ public final class RtVideoOptions {
 
     private static ResetableOption waterWaves() {
         return boolResetable("caustica.options.rt.waterWaves", CausticaConfig.Rt.Composite.WATER_WAVES);
+    }
+
+    private static ResetableOption blockOutlineNeon() {
+        return boolResetable("caustica.options.rt.blockOutlineNeon", CausticaConfig.Rt.Overlay.BLOCK_OUTLINE_NEON);
     }
 
     private static ResetableOption dlssQuality() {

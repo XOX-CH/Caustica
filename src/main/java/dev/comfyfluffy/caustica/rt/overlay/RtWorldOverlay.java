@@ -91,13 +91,18 @@ public final class RtWorldOverlay {
             }
             if (!ready.isEmpty()) {
                 ensureOverlayBuffer(ctx, main.width, main.height);
-                RenderTarget uiTarget = RtUiOverlay.beginCompositeLayer(main);
-                long targetView = vkImageView(uiTarget.getColorTextureView());
-                if (targetView == 0L) {
-                    CausticaMod.LOGGER.warn("World overlay: UI overlay target has no Vulkan image view; skipping");
+                // Composite the world overlay (block outline, glow outline, name tags) directly into the
+                // main render target so it appears in the FG hudless capture. Previously this composited into
+                // the UI overlay, which made outlines a static 2D image reused across all FG-generated frames
+                // — causing jitter as the camera moves. By putting outlines in the main target, FG can
+                // interpolate them using scene motion vectors (= camera motion, which is approximately correct
+                // since outlines sit on the surface they outline).
+                long mainView = vkImageView(main.getColorTextureView());
+                if (mainView == 0L) {
+                    CausticaMod.LOGGER.warn("World overlay: main target has no Vulkan image view; skipping");
                     return;
                 }
-                record(ctx, ready, targetView, main.width, main.height);
+                record(ctx, ready, mainView, main.width, main.height);
             }
         } catch (Throwable t) {
             failed = true;

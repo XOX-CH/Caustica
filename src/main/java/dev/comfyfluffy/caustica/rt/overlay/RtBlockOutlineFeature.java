@@ -84,6 +84,8 @@ final class RtBlockOutlineFeature implements RtOverlayFeature {
     private RtBuffer vbo;
     private int vertexCount;
     private long boundSet;
+    // Neon colour fields: computed in prepare(), used in record().
+    private float neonR, neonG, neonB;
 
     @Override
     public boolean prepare(RtContext ctx, RtOverlayFramePool pool, RtGpuExecutor.GraphicsUse graphicsUse,
@@ -137,6 +139,16 @@ final class RtBlockOutlineFeature implements RtOverlayFeature {
         }
 
         ensureResources(ctx, width, height);
+        // Neon colour cycle: smooth hue rotation when the config option is on.
+        if (CausticaConfig.Rt.Overlay.BLOCK_OUTLINE_NEON.value()) {
+            float hue = (System.currentTimeMillis() % 5000) / 5000f; // full cycle every 5 seconds
+            float[] rgb = hslToRgb(hue, 0.9f, 0.55f);
+            neonR = rgb[0];
+            neonG = rgb[1];
+            neonB = rgb[2];
+        } else {
+            neonR = neonG = neonB = 0f;
+        }
         float[] data = verts.toFloatArray();
         vbo = pool.acquireVertex(ctx, (long) data.length * Float.BYTES, "block outline vbo");
         MemoryUtil.memFloatBuffer(vbo.mapped, data.length).put(data);
@@ -176,6 +188,26 @@ final class RtBlockOutlineFeature implements RtOverlayFeature {
         BlockInWorld blockInWorld = new BlockInWorld(level, pos, false);
         return !itemStack.isEmpty()
                 && (itemStack.canBreakBlockInAdventureMode(blockInWorld) || itemStack.canPlaceOnBlockInAdventureMode(blockInWorld));
+    }
+
+    /**
+     * Convert HSL (hue 0-1, sat 0-1, light 0-1) to linear RGB float[3] for the neon colour cycle.
+     */
+    private static float[] hslToRgb(float hue, float sat, float light) {
+        float c = (1f - Math.abs(2f * light - 1f)) * sat;
+        float x = c * (1f - Math.abs((hue * 6f) % 2f - 1f));
+        float m = light - c / 2f;
+        float r, g, b;
+        int sextant = (int) (hue * 6f);
+        switch (sextant) {
+            case 0: r = c; g = x; b = 0; break;
+            case 1: r = x; g = c; b = 0; break;
+            case 2: r = 0; g = c; b = x; break;
+            case 3: r = 0; g = x; b = c; break;
+            case 4: r = x; g = 0; b = c; break;
+            default: r = c; g = 0; b = x; break;
+        }
+        return new float[]{r + m, g + m, b + m};
     }
 
     private void ensureResources(RtContext ctx, int width, int height) {
@@ -238,7 +270,7 @@ final class RtBlockOutlineFeature implements RtOverlayFeature {
                 RtEntities entities = RtEntities.INSTANCE;
                 push.putFloat(64, entities.glowCamOffsetX()).putFloat(68, entities.glowCamOffsetY())
                         .putFloat(72, entities.glowCamOffsetZ());
-                push.putFloat(80, 0f).putFloat(84, 0f).putFloat(88, 0f).putFloat(92, OUTLINE_ALPHA);
+                push.putFloat(80, neonR).putFloat(84, neonG).putFloat(88, neonB).putFloat(92, OUTLINE_ALPHA);
                 VK10.vkCmdPushConstants(cmd, pipeline.layout,
                         VK10.VK_SHADER_STAGE_VERTEX_BIT | VK10.VK_SHADER_STAGE_FRAGMENT_BIT, 0, push);
                 VK10.vkCmdDraw(cmd, vertexCount, 1, 0, 0);
