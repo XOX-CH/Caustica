@@ -89,10 +89,7 @@ public final class RtVideoOptions {
             return new ResetableOption[] {
                 dlssFgEnabled(),
                 dlssFgMultiFrame(),
-                dlssFgForceFifo(),
-                dlssFgAutoReflex(),
-                reflexEnabled(),
-                reflexBoost(),
+                reflexMerged(),
                 fgSync(),
                 fpsCap()
             };
@@ -460,45 +457,6 @@ public final class RtVideoOptions {
         return new ResetableOption(option, factoryDefault);
     }
 
-    private static ResetableOption dlssFgForceFifo() {
-        BooleanSetting setting = CausticaConfig.Rt.Fg.FORCE_FIFO_PRESENT;
-        boolean factoryDefault = setting.defaultValue();
-        OptionInstance<Boolean> option = OptionInstance.createBoolean(
-            "caustica.options.rt.dlssFgForceFifo",
-            OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.dlssFgForceFifo.tooltip")),
-            factoryDefault,
-            forceFifo -> {
-                if (setting.value() != forceFifo) {
-                    setting.set(forceFifo);
-                    // The present mode is fixed at swapchain creation, so the override only takes effect
-                    // on a rebuild — same invalidation path the FG toggle and multiplier use.
-                    Minecraft.getInstance().invalidateSurfaceConfiguration();
-                }
-            });
-        option.set(setting.value());
-        return new ResetableOption(option, factoryDefault);
-    }
-
-    private static ResetableOption dlssFgAutoReflex() {
-        BooleanSetting setting = CausticaConfig.Rt.Fg.AUTO_REFLEX;
-        boolean factoryDefault = setting.defaultValue();
-        OptionInstance<Boolean> option = OptionInstance.createBoolean(
-            "caustica.options.rt.dlssFgAutoReflex",
-            OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.dlssFgAutoReflex.tooltip")),
-            factoryDefault,
-            autoReflex -> {
-                if (setting.value() != autoReflex) {
-                    setting.set(autoReflex);
-                    // The driver sleep mode is configured per swapchain (and only ever switched on), so
-                    // rebuild to either apply it on a fresh swapchain or let a fresh one start without it.
-                    Minecraft.getInstance().invalidateSurfaceConfiguration();
-                    warnFgAutoReflexUnavailable();
-                }
-            });
-        option.set(setting.value());
-        return new ResetableOption(option, factoryDefault);
-    }
-
     /**
      * FG's auto-Reflex linkage can only take effect when {@code VK_NV_low_latency2} was enabled at device
      * creation — a mid-session enable with the extension absent silently does nothing until restart, so
@@ -514,12 +472,30 @@ public final class RtVideoOptions {
         }
     }
 
-    private static ResetableOption reflexEnabled() {
-        return boolResetable("caustica.options.rt.reflex", CausticaConfig.Rt.Reflex.ENABLED);
-    }
-
-    private static ResetableOption reflexBoost() {
-        return boolResetable("caustica.options.rt.reflexBoost", CausticaConfig.Rt.Reflex.LOW_LATENCY_BOOST);
+    /**
+     * Merged Reflex toggle: enables both NVIDIA Reflex and Reflex Boost together.
+     * When ON, both {@link CausticaConfig.Rt.Reflex#ENABLED} and
+     * {@link CausticaConfig.Rt.Reflex#LOW_LATENCY_BOOST} are set to true.
+     * When OFF, both are set to false.
+     */
+    private static ResetableOption reflexMerged() {
+        boolean factoryDefault = false;
+        OptionInstance<Boolean> option = OptionInstance.createBoolean(
+            "caustica.options.rt.reflexMerged",
+            OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.reflexMerged.tooltip")),
+            factoryDefault,
+            enabled -> {
+                if (CausticaConfig.Rt.Reflex.ENABLED.value() != enabled
+                        || CausticaConfig.Rt.Reflex.LOW_LATENCY_BOOST.value() != enabled) {
+                    CausticaConfig.Rt.Reflex.ENABLED.set(enabled);
+                    CausticaConfig.Rt.Reflex.LOW_LATENCY_BOOST.set(enabled);
+                    Minecraft.getInstance().invalidateSurfaceConfiguration();
+                }
+            });
+        boolean current = CausticaConfig.Rt.Reflex.ENABLED.value()
+                && CausticaConfig.Rt.Reflex.LOW_LATENCY_BOOST.value();
+        option.set(current);
+        return new ResetableOption(option, factoryDefault);
     }
 
     /**
