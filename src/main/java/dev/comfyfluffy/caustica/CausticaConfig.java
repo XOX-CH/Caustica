@@ -936,9 +936,9 @@ public final class CausticaConfig {
              * absolute exposure multiplier in the resolve shader. Defaults match the default look package.
              */
             public static final FloatSetting MIN_EV =
-                    clampedFloat("caustica.rt.exposure.minEv", "exposure.min-ev", -15.0f, -20.0f, 5.0f);
+                    clampedFloat("caustica.rt.exposure.minEv", "exposure.min-ev", -14.0f, -20.0f, 5.0f);
             public static final FloatSetting MAX_EV =
-                    clampedFloat("caustica.rt.exposure.maxEv", "exposure.max-ev", -2.0f, -15.0f, 10.0f);
+                    clampedFloat("caustica.rt.exposure.maxEv", "exposure.max-ev", -10.0f, -15.0f, 10.0f);
 
             private Exposure() {
             }
