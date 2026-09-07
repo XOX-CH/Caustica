@@ -59,8 +59,9 @@ public final class CausticaConfig {
             Rt.ENABLED, Rt.Composite.SPP, Rt.Composite.MAX_BOUNCES, Rt.Composite.GI_STRENGTH,
             Rt.Terrain.ASYNC_DISPATCH_PER_PASS, Rt.Omm.ENABLED,
             Rt.Entities.ENABLED, Rt.Entities.GLOW_ENABLED, Rt.EntityTextures.MAX_TEXTURES, Rt.DlssRr.ENABLED, Rt.Fg.ENABLED,
+            Rt.Overlay.BLOCK_OUTLINE_ENABLED, Rt.Overlay.BLOCK_OUTLINE_NEON,
             Rt.Reflex.ENABLED, Rt.Bloom.STRENGTH, Rt.Exposure.MODE, Rt.Tonemap.GAMMA, Rt.Tonemap.HUE_SHIFT,
-            Rt.Tonemap.SATURATION, Rt.Lighting.SUN_COLOR_TEMP, Rt.FrameStats.ENABLED,
+            Rt.Tonemap.SATURATION, Rt.Lighting.SUN_COLOR_TEMP, Rt.Lighting.NIGHT_BRIGHTNESS, Rt.FrameStats.ENABLED,
             Rt.Screenshots.EXR_ENABLED, Rt.Hdr.ENABLED, Ngx.PATH,
             CausticaConfig.Rt.Water.WAVE_STRENGTH,
             CausticaConfig.Rt.Water.WAVE_HEIGHT,
@@ -578,8 +579,8 @@ public final class CausticaConfig {
          * multiplier (160 Hz at 3x → 53.333 fps rendered) instead of the manual {@link #FPS_CAP} value,
          * keeping rendered frames aligned to whole vblank multiples. Frames without FG presenting
          * (menus, loading, FG disabled or failed) run uncapped; the manual cap applies only while this
-         * is off, and disabling this resets the manual cap to the unlimited sentinel (it was
-         * unreachable while synced, so any stored value is stale).
+         * is off, and disabling this stores the last displayed synced rate as the manual cap so the
+         * pacing target is retained.
          */
         public static final BooleanSetting SYNC_FRAME_CAP =
                 bool("caustica.rt", "sync-frame-cap", true);
@@ -609,7 +610,7 @@ public final class CausticaConfig {
             public static final FloatSetting REFLECTION_SCALE =
                     clampedFloat("caustica.rt.reflectionScale", "composite.reflection-scale", 1.0f, 0.0f, 3.0f);
             public static final FloatSetting GI_STRENGTH =
-                    clampedFloat("caustica.rt.giStrength", "composite.gi-strength", 0.20f, 0.1f, 1.0f);
+                    clampedFloat("caustica.rt.giStrength", "composite.gi-strength", 0.50f, 0.1f, 1.0f);
 
             private Composite() {
             }
@@ -655,6 +656,14 @@ public final class CausticaConfig {
             // Sun colour temperature: 0 = cool, 0.5 = physical sky (neutral), 1 = warm.
             public static final FloatSetting SUN_COLOR_TEMP =
                     clampedFloat("caustica.rt.lighting.sunColorTemp", "lighting.sun-color-temp", 0.5f, 0.1f, 1.0f);
+
+            /**
+             * Night brightness multiplier. Scales moon illuminance, night airglow, and star luminance
+             * together, making night-time scenes brighter or darker without affecting daytime lighting.
+             * 0.5 = physical default from the look package; 0.1 = minimum; 1.0 = 50% stronger than old max.
+             */
+            public static final FloatSetting NIGHT_BRIGHTNESS =
+                    clampedFloat("caustica.rt.lighting.nightBrightness", "lighting.night-brightness", 0.5f, 0.1f, 1.0f);
 
             private Lighting() {
             }
@@ -936,7 +945,7 @@ public final class CausticaConfig {
              * absolute exposure multiplier in the resolve shader. Defaults match the default look package.
              */
             public static final FloatSetting MIN_EV =
-                    clampedFloat("caustica.rt.exposure.minEv", "exposure.min-ev", -14.0f, -20.0f, 5.0f);
+                    clampedFloat("caustica.rt.exposure.minEv", "exposure.min-ev", -7.0f, -20.0f, 5.0f);
             public static final FloatSetting MAX_EV =
                     clampedFloat("caustica.rt.exposure.maxEv", "exposure.max-ev", -10.0f, -15.0f, 10.0f);
 

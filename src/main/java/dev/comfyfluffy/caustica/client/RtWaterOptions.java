@@ -71,7 +71,7 @@ public final class RtWaterOptions {
 
     private static ResetableOption causticBrightness() {
         return tenthsSlider("caustica.options.rt.causticMax",
-                CausticaConfig.Rt.Water.CAUSTIC_BRIGHTNESS, 0, 50, 50);
+                CausticaConfig.Rt.Water.CAUSTIC_BRIGHTNESS, 0, 10, 10);
     }
 
     private static ResetableOption waterDensity() {

@@ -1,4 +1,4 @@
-{
+﻿{
 	"caustica.options.title": "Caustica-DLSS",
 		"key.caustica.openOptions": "打开 Caustica-DLSS 选项",
 		"caustica.options.reset": "重置",
@@ -9,6 +9,12 @@
 		"caustica.options.detail.open": "细节调整",
 	"caustica.options.detail.title": "细节调整",
 	"caustica.options.detail.header": "细节调整",
+	"caustica.options.exposure.open": "曝光",
+		"caustica.options.exposure.title": "曝光",
+		"caustica.options.exposure.header": "曝光",
+		"caustica.options.raytracing.open": "RTX 光追",
+		"caustica.options.raytracing.title": "RTX 光追",
+		"caustica.options.raytracing.header": "RTX 光追",
 
 	"caustica.options.rt.header": "光线追踪",
 		"caustica.options.rt.pathTracing": "路径追踪",
@@ -46,7 +52,10 @@
 	"caustica.options.rt.waterWaves": "动态水面",
 		"caustica.options.rt.waterWaves.tooltip": "对水面法线进行动画处理，以显示移动波浪高光。",
 
-		"caustica.options.rt.blockOutlineNeon": "霓虹方块轮廓",
+		"caustica.options.rt.blockOutline": "方块轮廓",
+			"caustica.options.rt.blockOutline.tooltip": "显示目标方块的线框轮廓（选取框）。",
+		
+			"caustica.options.rt.blockOutlineNeon": "霓虹方块轮廓",
 		"caustica.options.rt.blockOutlineNeon.tooltip": "让方块选取框的轮廓颜色在 HSL 色轮上循环，产生霓虹变色动画效果。",
 
 		"caustica.options.rt.hdr": "HDR 输出",
@@ -108,6 +117,9 @@
 
 	"caustica.options.rt.sunColorTemp": "太阳色温",
 	"caustica.options.rt.sunColorTemp.tooltip": "太阳光的色温调节。×0.50 匹配物理天空色；×0.10 偏冷（蓝白），×1.00 偏暖（琥珀/橙黄）。",
+
+	"caustica.options.rt.nightBrightness": "夜晚亮度",
+	"caustica.options.rt.nightBrightness.tooltip": "月光、夜辉和星光的亮度倍率。×1.00 = 匹配 look package 的物理默认值；×0.00 = 完全黑暗（无月光和星光）；大于 ×1.00 的值会增强夜晚光照。",
 
 	"caustica.options.rt.giStrength": "间接光照强度",
 	"caustica.options.rt.giStrength.tooltip": "全局间接光照强度。×0.50 为 DLSS 默认值（正常 GI）；×0.10 减少 GI，×1.00 增强 GI（内部已放大 5 倍以增强效果）。",

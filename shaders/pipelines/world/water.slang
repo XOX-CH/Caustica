@@ -291,21 +291,21 @@ public float3 waterCaustic(float3 exitPos, float3 lightDir, float waterDist) {
     float2 pzr = causticLanding(base + float2(0.0, CAUSTIC_EPS), t, inc, h, iorR);
     float detr = abs((pxr.x - p0r.x) * (pzr.y - p0r.y) - (pxr.y - p0r.y) * (pzr.x - p0r.x));
     float focusR = (CAUSTIC_EPS * CAUSTIC_EPS) / max(detr, 1.0e-5);
-    float causticR = lerp(1.0, min(focusR, worldPush.waterDetailParams.w * 300.0), fade);
+    float causticR = lerp(1.0, min(focusR, worldPush.waterDetailParams.w * 30000.0), fade);
     // Green channel
     float2 p0g = causticLanding(base, t, inc, h, iorG);
     float2 pxg = causticLanding(base + float2(CAUSTIC_EPS, 0.0), t, inc, h, iorG);
     float2 pzg = causticLanding(base + float2(0.0, CAUSTIC_EPS), t, inc, h, iorG);
     float detg = abs((pxg.x - p0g.x) * (pzg.y - p0g.y) - (pxg.y - p0g.y) * (pzg.x - p0g.x));
     float focusG = (CAUSTIC_EPS * CAUSTIC_EPS) / max(detg, 1.0e-5);
-    float causticG = lerp(1.0, min(focusG, worldPush.waterDetailParams.w * 300.0), fade);
+    float causticG = lerp(1.0, min(focusG, worldPush.waterDetailParams.w * 30000.0), fade);
     // Blue channel
     float2 p0b = causticLanding(base, t, inc, h, iorB);
     float2 pxb = causticLanding(base + float2(CAUSTIC_EPS, 0.0), t, inc, h, iorB);
     float2 pzb = causticLanding(base + float2(0.0, CAUSTIC_EPS), t, inc, h, iorB);
     float detb = abs((pxb.x - p0b.x) * (pzb.y - p0b.y) - (pxb.y - p0b.y) * (pzb.x - p0b.x));
     float focusB = (CAUSTIC_EPS * CAUSTIC_EPS) / max(detb, 1.0e-5);
-    float causticB = lerp(1.0, min(focusB, worldPush.waterDetailParams.w * 300.0), fade);
+    float causticB = lerp(1.0, min(focusB, worldPush.waterDetailParams.w * 30000.0), fade);
 
     // Compose the RGB caustic and apply the color tint blend
     float3 chromatic = float3(causticR, causticG, causticB);

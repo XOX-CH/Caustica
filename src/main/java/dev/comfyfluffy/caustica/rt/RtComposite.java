@@ -1419,11 +1419,14 @@ public final class RtComposite {
 
         RtLookPackage.Sky sky = LOOK.sky();
         RtLookPackage.Lighting lighting = LOOK.lighting();
+        float nightBrightness = CausticaConfig.Rt.Lighting.NIGHT_BRIGHTNESS.value();
+        // Remap slider 0.1~1.0 to effective 1.0~15.0 (old 1~10 + 50% max boost)
+        float nightMul = 1.0f + (nightBrightness - 0.1f) * (14.0f / 0.9f);
         CelestialUv uv = celestialUv(moonPhase);
         return new SkyPush(
                 new Float4(sunAngle, moonAngle, starAngle, starBrightness),
-                new Float4(lighting.sunIlluminanceLux(), lighting.moonIlluminanceLux(),
-                        lighting.nightAirglowLuminanceCdM2(), lighting.starLuminanceCdM2()),
+                new Float4(lighting.sunIlluminanceLux(), lighting.moonIlluminanceLux() * nightMul,
+                        lighting.nightAirglowLuminanceCdM2() * nightMul, lighting.starLuminanceCdM2() * nightMul),
                 new Float4(sky.sunNoonSouthTiltDegrees() * toRadians,
                         sky.sunAngularRadiusDegrees() * toRadians,
                         sky.moonAngularRadiusDegrees() * toRadians,

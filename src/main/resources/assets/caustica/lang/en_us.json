@@ -9,6 +9,12 @@
 	"caustica.options.detail.open": "Detail Tuning",
 	"caustica.options.detail.title": "Detail Tuning",
 	"caustica.options.detail.header": "Detail Tuning",
+	"caustica.options.exposure.open": "Exposure",
+		"caustica.options.exposure.title": "Exposure",
+		"caustica.options.exposure.header": "Exposure",
+		"caustica.options.raytracing.open": "RTX Ray Tracing",
+		"caustica.options.raytracing.title": "RTX Ray Tracing",
+		"caustica.options.raytracing.header": "RTX Ray Tracing",
 
 	"caustica.options.rt.header": "Ray Tracing",
 		"caustica.options.rt.pathTracing": "Path Tracing",
@@ -49,7 +55,10 @@
 	"caustica.options.rt.waterWaves": "Animated Water",
 		"caustica.options.rt.waterWaves.tooltip": "Animate water-surface normals for moving wave highlights.",
 
-		"caustica.options.rt.blockOutlineNeon": "Neon Block Outline",
+		"caustica.options.rt.blockOutline": "Block Outline",
+			"caustica.options.rt.blockOutline.tooltip": "Show the wireframe block outline (selection box) around the block you are looking at.",
+		
+			"caustica.options.rt.blockOutlineNeon": "Neon Block Outline",
 		"caustica.options.rt.blockOutlineNeon.tooltip": "Cycle the block outline colour through the HSL hue wheel for a neon animated effect.",
 
 		"caustica.options.rt.hdr": "HDR Output",
@@ -105,6 +114,9 @@
 
 	"caustica.options.rt.sunColorTemp": "Sun Color Temperature",
 	"caustica.options.rt.sunColorTemp.tooltip": "Sunlight colour temperature applied to the main sky light. ×0.50 matches the physical sky; ×0.10 shifts cool (blue/white), ×1.00 shifts warm (amber/orange).",
+
+	"caustica.options.rt.nightBrightness": "Night Brightness",
+	"caustica.options.rt.nightBrightness.tooltip": "Multiplier for moon illuminance, night airglow, and star luminance. ×1.00 = physical default from the look package; ×0.00 = pitch darkness (no moonlight or starlight); values above ×1.00 exaggerate night lighting.",
 
 	"caustica.options.rt.giStrength": "GI Indirect Strength",
 	"caustica.options.rt.giStrength.tooltip": "Global indirect lighting strength. ×0.50 is DLSS default (normal GI); ×0.10 reduces GI, ×1.00 boosts GI (internally scaled 5× for stronger effect).",
@@ -164,9 +176,9 @@
 	"caustica.options.rt.reflexMerged": "NVIDIA Reflex",
 		"caustica.options.rt.reflexMerged.tooltip": "NVIDIA Reflex Low Latency with Boost. Reduces system latency by synchronising the simulation loop with the renderer, and forces the GPU clock to its maximum frequency for minimal latency. Requires supported hardware.",
 	"caustica.options.rt.fgSync": "FG Sync",
-	"caustica.options.rt.fgSync.tooltip": "Locks the Render FPS Cap below to refresh rate ÷ Frame Generation multiplier for exact vblank pacing (160 Hz: 2x → 80.0, 3x → 53.333, 6x → 26.667) while Frame Generation is presenting; menus and worlds without FG run uncapped. The cap slider is locked while this is on. Turning this off also resets the manual cap to Unlimited — drag the slider afterwards if you want one.",
-	"caustica.options.rt.fpsCap": "Render FPS Cap",
-	"caustica.options.rt.fpsCap.tooltip": "Precision cap for rendered frames in 0.1 fps steps, using vanilla Max Framerate semantics: Frame Generation multiplies on top, so at 6x a cap of 26.7 still presents ~160 fps (an external present-count limiter like RTSS would clamp the generated frames too). Locked (display only) while FG Sync is on; turning FG Sync off resets this to Unlimited, after which it can be adjusted freely. 260.0 = unlimited. Composes with vanilla Max Framerate — the lower cap wins, so leave that at Unlimited unless you want both.",
+	"caustica.options.rt.fgSync.tooltip": "Locks the Render FPS Cap below to refresh rate ÷ Frame Generation multiplier for exact vblank pacing (160 Hz: 2x → 80.0, 3x → 53.333, 6x → 26.667) while Frame Generation is presenting; menus and worlds without FG run uncapped. The cap slider is locked while this is on. Turning this off keeps the currently displayed synced rate as the manual cap, which applies immediately and can then be adjusted freely.",
+		"caustica.options.rt.fpsCap": "Render FPS Cap",
+		"caustica.options.rt.fpsCap.tooltip": "Precision cap for rendered frames in 0.1 fps steps, using vanilla Max Framerate semantics: Frame Generation multiplies on top, so at 6x a cap of 26.7 still presents ~160 fps (an external present-count limiter like RTSS would clamp the generated frames too). Locked (display only) while FG Sync is on; turning FG Sync off keeps the displayed synced rate as this value, after which it can be adjusted freely. 260.0 = unlimited. Composes with vanilla Max Framerate — the lower cap wins, so leave that at Unlimited unless you want both.",
 
 	"caustica.options.water.save": "Save",
 	"caustica.options.water.save.active": "▶ Save to Preset",

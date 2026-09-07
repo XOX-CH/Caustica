@@ -10,5 +10,7 @@
 
 - Prefer direct explanations of why the current code is required, especially API contracts, synchronization rules, units, and non-obvious constraints.
 
-- Until release, modify only the English locale (`en_us.json`); leave every other locale unchanged.
+- Keep both English (`en_us.json`) and Chinese (`zh_cn.json`) locales in sync when adding or modifying localisation entries.
+
+<br />
 

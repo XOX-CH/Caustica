@@ -31,6 +31,7 @@ public final class RtDetailOptions {
             roughnessScale(),
             reflectionScale(),
             sunColorTemp(),
+            nightBrightness(),
             giStrength(),
             bloomStrength(),
             hueShift(),
@@ -99,6 +100,11 @@ public final class RtDetailOptions {
             hundredths -> setting.set(hundredths / 100.0f));
         option.set(Math.clamp(Math.round(setting.value() * 100.0f), 10, 100));
         return new ResetableOption(option, factoryDefault);
+    }
+
+    private static ResetableOption nightBrightness() {
+        return hundredthsSlider("caustica.options.rt.nightBrightness",
+                CausticaConfig.Rt.Lighting.NIGHT_BRIGHTNESS, 10, 100, 50);
     }
 
     private static ResetableOption giStrength() {
