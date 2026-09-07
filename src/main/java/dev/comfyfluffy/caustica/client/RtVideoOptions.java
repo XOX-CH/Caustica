@@ -56,6 +56,8 @@ public final class RtVideoOptions {
                 pathTracingEnabled(),
                 exposureMode(),
                 manualEv(),
+                minEvSlider(),
+                maxEvSlider(),
                 gamma(),
                 spp(),
                 maxBounces(),
@@ -107,6 +109,8 @@ public final class RtVideoOptions {
         List<ResetableOption> options = new ArrayList<>(List.of(
             exposureMode(),
             manualEv(),
+            minEvSlider(),
+            maxEvSlider(),
             gamma(),
             spp(),
             maxBounces(),
@@ -163,6 +167,42 @@ public final class RtVideoOptions {
             factoryDefault,
             tenths -> setting.set(tenths / 10.0f));
         option.set(Math.clamp(Math.round(setting.value() * 10.0f), -150, 150));
+        return new ResetableOption(option, factoryDefault);
+    }
+
+    private static ResetableOption minEvSlider() {
+        FloatSetting setting = CausticaConfig.Rt.Exposure.MIN_EV;
+        int factoryDefault = Math.clamp(Math.round(setting.defaultValue() * 10.0f), -200, 50);
+        OptionInstance<Integer> option = new OptionInstance<>(
+            "caustica.options.rt.minEv",
+            OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.minEv.tooltip")),
+            (caption, tenths) -> {
+                float ev = tenths / 10.0f;
+                return Options.genericValueLabel(caption,
+                        Component.literal(String.format(Locale.ROOT, "%.1f EV", ev)));
+            },
+            new OptionInstance.IntRange(-200, 50),
+            factoryDefault,
+            tenths -> setting.set(tenths / 10.0f));
+        option.set(Math.clamp(Math.round(setting.value() * 10.0f), -200, 50));
+        return new ResetableOption(option, factoryDefault);
+    }
+
+    private static ResetableOption maxEvSlider() {
+        FloatSetting setting = CausticaConfig.Rt.Exposure.MAX_EV;
+        int factoryDefault = Math.clamp(Math.round(setting.defaultValue() * 10.0f), -150, 100);
+        OptionInstance<Integer> option = new OptionInstance<>(
+            "caustica.options.rt.maxEv",
+            OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.maxEv.tooltip")),
+            (caption, tenths) -> {
+                float ev = tenths / 10.0f;
+                return Options.genericValueLabel(caption,
+                        Component.literal(String.format(Locale.ROOT, "%.1f EV", ev)));
+            },
+            new OptionInstance.IntRange(-150, 100),
+            factoryDefault,
+            tenths -> setting.set(tenths / 10.0f));
+        option.set(Math.clamp(Math.round(setting.value() * 10.0f), -150, 100));
         return new ResetableOption(option, factoryDefault);
     }
 
@@ -634,10 +674,9 @@ public final class RtVideoOptions {
         OptionInstance<Integer> option = new OptionInstance<>(
             "caustica.options.rt.debugView",
             OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.debugView.tooltip")),
-            // CycleButton (used for Enum values) already prepends "caption: " itself (DisplayState.
-            // NAME_AND_VALUE), so this must return only the value's text, not caption + value again.
-            (caption, value) -> Component.translatable("caustica.options.rt.debugView." + value),
-            new OptionInstance.Enum<>(List.of(0, 1, 2, 3, 4, 5, 6, 7, 8, 9), Codec.INT),
+            (caption, value) -> Options.genericValueLabel(caption,
+                    Component.translatable("caustica.options.rt.debugView." + value)),
+            new OptionInstance.IntRange(0, 9),
             factoryDefault,
             setting::set);
         option.set(Math.clamp(setting.value(), 0, 9));

@@ -22,7 +22,13 @@
 	"caustica.options.rt.manualEv": "曝光 EV",
 	"caustica.options.rt.manualEv.tooltip": "以档位为单位的曝光补偿。手动模式下这是固定曝光；自动模式下会让自动曝光更亮或更暗。",
 
-	"caustica.options.rt.spp": "每像素采样数",
+		"caustica.options.rt.minEv": "亮部曝光 EV",
+		"caustica.options.rt.minEv.tooltip": "调整室外曝光",
+
+		"caustica.options.rt.maxEv": "暗部曝光 EV",
+		"caustica.options.rt.maxEv.tooltip": "调整室内曝光",
+
+		"caustica.options.rt.spp": "每像素采样数",
 	"caustica.options.rt.spp.tooltip": "每帧对每个像素进行的路径追踪采样数。数值越高画面越干净，但负载也越高。",
 
 	"caustica.options.rt.maxBounces": "路径反弹",

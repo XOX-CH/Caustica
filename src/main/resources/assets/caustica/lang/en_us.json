@@ -22,7 +22,13 @@
 	"caustica.options.rt.manualEv": "Exposure EV",
 	"caustica.options.rt.manualEv.tooltip": "Exposure compensation in stops. In Manual, this is the fixed exposure. In Auto, this biases the auto exposure brighter or darker.",
 
-	"caustica.options.rt.gamma": "Gamma",
+		"caustica.options.rt.minEv": "Min EV",
+		"caustica.options.rt.minEv.tooltip": "Lower bound for auto-exposure in EV. Prevents the exposure from going below this value in dark scenes. Default matches the look package calibration.",
+
+		"caustica.options.rt.maxEv": "Max EV",
+		"caustica.options.rt.maxEv.tooltip": "Upper bound for auto-exposure in EV. Prevents the exposure from exceeding this value in bright scenes. Default matches the look package calibration.",
+
+		"caustica.options.rt.gamma": "Gamma",
 	"caustica.options.rt.gamma.tooltip": "Post-transform luminance gamma. Values below 1.00 brighten shadows and midtones while preserving black, white, and color ratios.",
 
 	"caustica.options.rt.spp": "Samples Per Pixel",

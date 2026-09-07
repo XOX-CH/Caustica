@@ -931,15 +931,24 @@ public final class CausticaConfig {
             public static final BooleanSetting PRE_EXPOSURE =
                     bool("caustica.rt.exposure.preExposure", "exposure.pre-exposure", true);
 
+            /**
+             * Auto-exposure min/max EV bounds. These override the look package defaults and clamp the
+             * absolute exposure multiplier in the resolve shader. Defaults match the default look package.
+             */
+            public static final FloatSetting MIN_EV =
+                    clampedFloat("caustica.rt.exposure.minEv", "exposure.min-ev", -15.0f, -20.0f, 5.0f);
+            public static final FloatSetting MAX_EV =
+                    clampedFloat("caustica.rt.exposure.maxEv", "exposure.max-ev", -2.0f, -15.0f, 10.0f);
+
             private Exposure() {
             }
 
             public static float minEv() {
-                return dev.comfyfluffy.caustica.rt.RtLookPackage.current().exposure().minEv();
+                return MIN_EV.value();
             }
 
             public static float maxEv() {
-                return dev.comfyfluffy.caustica.rt.RtLookPackage.current().exposure().maxEv();
+                return MAX_EV.value();
             }
 
             public static String curve() {

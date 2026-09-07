@@ -255,10 +255,10 @@ public final class RtFramePresenter {
     }
 
     /**
-     * Present pacing diagnostics, logged once per second while {@code caustica.rt.fg} is enabled: real vs
-     * generated {@code vkQueuePresentKHR} calls (MC's own fps counter only counts rendered frames, so it can't
-     * show FG's extra presents), plus the generated-frame acquire wait/timeout totals and total
-     * {@link #prepareExtraFrames} time. Those separate a present-pacing stall (acquireWait/acquireTimeouts
+     * Present pacing diagnostics, logged once per second at DEBUG level while {@code caustica.rt.fg} is
+     * enabled: real vs generated {@code vkQueuePresentKHR} calls (MC's own fps counter only counts rendered
+     * frames, so it can't show FG's extra presents), plus the generated-frame acquire wait/timeout totals and
+     * total {@link #prepareExtraFrames} time. Those separate a present-pacing stall (acquireWait/acquireTimeouts
      * climb while prepare time stays flat) from a slow interpolation/record stage (prepareMs climbs instead).
      */
     private void logPresentRate(int generatedThisFrame) {
@@ -276,7 +276,7 @@ public final class RtFramePresenter {
         double seconds = elapsed / 1.0e9;
         double realFps = realFramesInWindow / seconds;
         double totalFps = (realFramesInWindow + generatedFramesInWindow) / seconds;
-        CausticaMod.LOGGER.info(
+        CausticaMod.LOGGER.debug(
                 "[FG present-rate] real={} gen={} realFps={} totalPresentFps={} configuredMultiFrameCount={} "
                         + "interpOk={} interpFallbackDuplicate={} prepareMs={} acquireWaitMs={} acquireTimeouts={}",
                 realFramesInWindow, generatedFramesInWindow,
