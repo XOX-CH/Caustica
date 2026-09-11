@@ -1,0 +1,197 @@
+--- p1 ---
+An Approximate Mie Scattering Function for Fog and Cloud
+Rendering
+Johannes Jendersie∗
+jjendersie@nvidia.com
+NVIDIA
+Berlin, Germany
+Eugene d’Eon∗
+edeon@nvidia.com
+NVIDIA
+Wellington, New Zealand
+(a) Henyey-Greenstein 𝑔 = 0.85
+ (b) Double Henyey-Greenstein
+ (c) Tabulated Mie Reference
+ (d) HG-Draine blend (ours)
+Figure 1: Path-traced multiple scattering in clouds using a single HG phase function (a) or HG-mixture (b) fails to match a
+tabulated reference Mie phase function (c). Our model (d) blends a HG forward peak with Draine’s phase function to achieve a
+closer match without requiring large tables for evaluation and sampling. Note the overall brightness and apparent detail in the
+clouds in (c,d) as compared to the more approximate models (a,b). All renders are 8000 spp and roughly equal time.
+ABSTRACT
+The Mie phase function describes the complex shapes that arise
+when light is scattered by water droplets. Inconvenient tables of
+data are required to include Mie scattering in a path tracer. To avoid
+this complexity, analytic models such as Cornette-Shanks (CS) or
+Henyey-Greenstein (HG) mixtures are often used instead, resulting
+in a lack of accuracy for fog, clouds, skies and tissue. We show that
+a blend of HG and Draine’s phase function can accurately match
+95% of the Mie phase function over a wide range of droplet sizes.
+We provide a practical parameter fit for this mapping and derive
+analytic CDF inversion of the Draine (and CS) phase function, to
+produce a parametric approximation with fully analytic evalua-
+tion and sampling. In this talk we describe our fitting procedure,
+sampling derivations, and compare the proposed model to several
+others.
+ACM Reference Format:
+Johannes Jendersie and Eugene d’Eon. 2023. An Approximate Mie Scattering
+Function for Fog and Cloud Rendering. InSpecial Interest Group on Computer
+Graphics and Interactive Techniques Conference Talks (SIGGRAPH ’23 Talks),
+August 06-10, 2023. ACM, New York, NY, USA, 2 pages. https://doi.org/10.
+1145/3587421.3595409
+∗Both authors contributed equally to this research.
+Permission to make digital or hard copies of part or all of this work for personal or
+classroom use is granted without fee provided that copies are not made or distributed
+for profit or commercial advantage and that copies bear this notice and the full citation
+on the first page. Copyrights for third-party components of this work must be honored.
+For all other uses, contact the owner/author(s).
+SIGGRAPH ’23 Talks, August 06-10, 2023, Los Angeles, CA, USA
+© 2023 Copyright held by the owner/author(s).
+ACM ISBN 979-8-4007-0143-6/23/08.
+https://doi.org/10.1145/3587421.3595409
+1 INTRODUCTION
+With the advent of hardware ray tracing, path tracing is increasingly
+used to render images in games and simulations. The accuracy of
+path tracing in scenes with atmospheric effects, such as fog and
+clouds, relies heavily on the phase function’s ability to approximate
+the interaction of light with small particles like water droplets.
+Unfortunately, the complex shapes (Figure 2) resulting from Mie
+scattering lack an analytic representation, and their evaluation and
+sampling necessitate extensive data tables. Consequently, simpler
+models such as the Henyey-Greenstein (HG) phase function, or
+their combinations, are often employed, but they are inadequate
+in certain situations (Figure 1). To increase accuracy and artistic
+expression, new analytic models are therefore desirable.
+To more closely approximate Mie scattering, analytic models
+such as Cornette-Shanks (CS) [1992] and Draine (D) [2003] have
+been proposed, but significant errors remain for both, and neither
+model provides analytic importance sampling, which is essential
+for real-time applications. In this talk, we show that both CS and
+Draine phase functions can be sampled analytically, and further,
+that a linear combination of HG and Draine can accurately fit 95%
+of the energy (the forward half) of the Mie phase function for water
+droplets typical of fog and clouds. We performed a parameter fitting
+for this approximation over a wide range of mean droplet sizes and
+compared the accuracy to a variety of other approximations. In
+summary, we present a new two-lobe, parametric, fully-analytic
+Mie approximation that outperforms previous work.
+--- p2 ---
+SIGGRAPH ’23 Talks, August 06-10, 2023, Los Angeles, CA, USA Johannes Jendersie and Eugene d’Eon
+0◦
+15◦
+30◦
+45◦
+60◦
+75◦90◦
+105◦
+120◦
+135◦
+150◦
+165◦
+180◦
+195◦
+210◦
+225◦
+240◦
+255◦
+270◦ 285◦
+300◦
+315◦
+330◦
+345◦
+Mie HG Draine CS
+2×HG 3×HG HG+D
+Figure 2: Cross section polar plots of the phase functions.
+1.1 Fitting Procedure
+We used a publicly available tool [Mie Sim 2020] to generate a
+tabulated Mie phase function𝜙Mie(𝜃) for water droplets in air (𝜂 =
+1.333) with log-normal-distributed diameters (standard deviation of
+0.25). The results were averaged uniformly over wavelength from
+400 nm to 700 nm. Figure 2 shows an example for 5 micron particles
+(in black).
+For the fitting of a target model 𝜙(𝜃), we tried a number of
+different loss functions and found
+𝐸AS =
+∑︁
+𝜃
+| cos(𝜃)| sin(𝜃)· (log𝜙(𝜃)− log𝜙Mie(𝜃))2. (1)
+to produce good results. The sin weighting accounts for integration
+over the sphere and the cos weighting together with L2 loss in log
+space helps maintain an accurate mean cosine and increase the
+influence of backward directions.
+2 THE MODEL
+We explored a number of different mixtures of HG, Draine, CS, vMF
+and Gegenbauer lobes and found that a blend of HG (for the peak)
+and Draine (for the bulk) provided the best fit overall. For a single-
+wavelength monodisperse simulation, the peak of Mie scattering
+is asymptotically known to be vMF [Chilton et al . 1969], but we
+found HG to be a better fit after including fluctuations in particle
+size and averaging over wavelength.
+Draine’s phase function is a two-parameter distribution
+𝜙𝛼,𝑔(𝜃) = 1
+4𝜋
+1−𝑔2
+(1+𝑔2− 2𝑔 cos𝜃)3/2
+1+𝛼 cos2𝜃
+1+𝛼(1+ 2𝑔2)/3 (2)
+and reduces to HG for𝛼 = 0, to Rayleigh for𝑔 = 0,𝛼 = 1 and to CS
+for𝛼 = 1.
+Figure 2 compares a number of isolated models (dashed lines),
+fitted using Equation (1), as well as several blends of HG lobes.
+None of these approximations fit the bulk of the distribution as
+well as our HG+Draine blend, which is remarkably close for the
+forward half of the phase function (accounting for 95% of the total
+scattered signal). While our approximation fails to produce the
+weak back-scattering peaks that lead to fogbow and glory features,
+these are not observable in most scenes, and our approximation
+remains the most accurate on average in this region. Performance
+over mean particle size is shown in Figure 3.
+0 10 20 30 40 50
+0
+5
+10
+Plausible
+fog particle
+sizes
+Mean particle size in µm
+Error Eq. (1) HG+D (Ours)
+2×HG
+3×HG
+Figure 3: Fitting error of several candidate models.
+For sampling cosines𝑢 of the Draine phase function (and there-
+fore also CS), we note that the CDF is easily obtained analytically.
+Upon a substitution of𝑢→( 1+𝑔2−𝑣 2)/( 2𝑔) to remove the square
+root, solving for random variate𝜉 is then the solution of a quartic
+equation (see supplemental for complete details).
+2.1 Our Fog Phase Function
+Using the combined HG+D phase function, we need four param-
+eters: two anisotropy parameters𝑔HG,𝑔 D, the𝛼 parameter of the
+Draine function and a mixture weight𝑤D∈[ 0, 1]:
+𝜙fog(𝜃) =(1−𝑤D)· 𝜙0,𝑔HG+𝑤D·𝜙𝛼,𝑔D. (3)
+We fitted our model𝜙fog(𝜃) over a range of water droplet diameters
+5 <𝑑 < 50 in µm and then produced a second fit to map𝑑 to the
+parameters:
+𝑔HG(𝑑) = e− 0.0990567
+𝑑−1.67154, (4)
+𝑔D(𝑑) = e− 2.20679
+𝑑+3.91029−0.428934, (5)
+𝛼(𝑑) = e3.62489− 8.29288
+𝑑+5.52825, (6)
+𝑤D(𝑑) = e− 0.599085
+𝑑−0.641583−0.665888 (7)
+to provide a meaningful and intuitive single parameter for our
+model. The additional error of this secondary fit is much smaller
+than the initial fitting error. See the supplemental material for
+plots of this approximation to reference data, as well as additional
+mappings for smaller particle diameters.
+REFERENCES
+Frank Chilton, Dixon D Jones, and Wilson K Talley. 1969. Imaging properties of light
+scattered by the sea. JOSA 59, 8 (1969), 891–898. https://doi.org/10.1364/JOSA.59.
+000891
+William M. Cornette and Joseph G. Shanks. 1992. Physically reasonable analytic
+expression for the single-scattering phase function. Applied Optics 31, 16 (Jun 1992),
+3152–3160. https://doi.org/10.1364/AO.31.003152
+BT Draine. 2003. Scattering by interstellar dust grains. I. Optical and ultraviolet. The
+Astrophysical Journal 598, 2 (2003), 1017. https://doi.org/10.1086/379118
+Virtual Photonics Technology Initiative. 2020. Mie Simulator GUI. Beckman Laser
+Institute, University of California, Irvine. https://github.com/VirtualPhotonics/
+MieSimulatorGUI

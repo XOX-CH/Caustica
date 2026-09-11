@@ -42,11 +42,80 @@ public final class RtRayTracingOptions {
             maxBounces(),
             entities(),
             particles(),
+            cloudEnabled(),
+            cloudQuality(),
+            cloudCoverage(),
+            cloudDensity(),
+            cloudWindSpeed(),
             dlssQuality(),
             dlssRrEnabled(),
             dlssRrPreset(),
             dlssUpscalePreset()
         };
+    }
+
+    private static ResetableOption cloudEnabled() {
+        return boolResetable("caustica.options.rt.cloud", CausticaConfig.Rt.Cloud.ENABLED);
+    }
+
+    private static ResetableOption cloudQuality() {
+        IntSetting setting = CausticaConfig.Rt.Cloud.QUALITY;
+        int factoryDefault = Math.clamp(setting.defaultValue(), 0, 2);
+        OptionInstance<Integer> option = new OptionInstance<>(
+            "caustica.options.rt.cloudQuality",
+            OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.cloudQuality.tooltip")),
+            (caption, tier) -> Options.genericValueLabel(caption,
+                    Component.translatable("caustica.options.rt.cloudQuality." + tier)),
+            new OptionInstance.IntRange(0, 2),
+            factoryDefault,
+            setting::set);
+        option.set(Math.clamp(setting.value(), 0, 2));
+        return new ResetableOption(option, factoryDefault);
+    }
+
+    private static ResetableOption cloudCoverage() {
+        return hundredthsSlider("caustica.options.rt.cloudCoverage",
+                CausticaConfig.Rt.Cloud.COVERAGE, 0, 100, 42);
+    }
+
+    private static ResetableOption cloudDensity() {
+        return hundredthsSlider("caustica.options.rt.cloudDensity",
+                CausticaConfig.Rt.Cloud.DENSITY, 10, 200, 100);
+    }
+
+    private static ResetableOption cloudWindSpeed() {
+        return tenthsSlider("caustica.options.rt.cloudWindSpeed",
+                CausticaConfig.Rt.Cloud.WIND_SPEED, 0, 300, 60);
+    }
+
+    /** Slider with one decimal place (value × 10). */
+    private static ResetableOption tenthsSlider(String captionKey, dev.comfyfluffy.caustica.CausticaConfig.FloatSetting setting,
+                                                int tenthsMin, int tenthsMax, int tenthsDefault) {
+        OptionInstance<Integer> option = new OptionInstance<>(
+                captionKey,
+                OptionInstance.cachedConstantTooltip(Component.translatable(captionKey + ".tooltip")),
+                (caption, tenths) -> Options.genericValueLabel(caption,
+                        Component.literal(String.format(Locale.ROOT, "%.1f", tenths / 10.0f))),
+                new OptionInstance.IntRange(tenthsMin, tenthsMax),
+                tenthsDefault,
+                tenths -> setting.set(tenths / 10.0f));
+        option.set(Math.clamp(Math.round(setting.value() * 10.0f), tenthsMin, tenthsMax));
+        return new ResetableOption(option, tenthsDefault);
+    }
+
+    /** Slider with two decimal places (value × 100). */
+    private static ResetableOption hundredthsSlider(String captionKey, dev.comfyfluffy.caustica.CausticaConfig.FloatSetting setting,
+                                                    int hundredthsMin, int hundredthsMax, int hundredthsDefault) {
+        OptionInstance<Integer> option = new OptionInstance<>(
+                captionKey,
+                OptionInstance.cachedConstantTooltip(Component.translatable(captionKey + ".tooltip")),
+                (caption, hundredths) -> Options.genericValueLabel(caption,
+                        Component.literal(String.format(Locale.ROOT, "%.2f", hundredths / 100.0f))),
+                new OptionInstance.IntRange(hundredthsMin, hundredthsMax),
+                hundredthsDefault,
+                hundredths -> setting.set(hundredths / 100.0f));
+        option.set(Math.clamp(Math.round(setting.value() * 100.0f), hundredthsMin, hundredthsMax));
+        return new ResetableOption(option, hundredthsDefault);
     }
 
     private static ResetableOption pathTracingEnabled() {

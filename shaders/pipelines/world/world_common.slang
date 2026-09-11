@@ -74,6 +74,16 @@ public struct WorldPush {
     // x sun color temperature (0=cool, 0.5=physical sky, 1=warm), y gi indirect strength,
     // z w reserved for future use.
     public float4   skyLook4;
+    // Volumetric cloud state (see cloud.slang):
+    //   cloudLook0: x weather coverage bias (config baseline + MC rain, folded on the CPU),
+    //               y wind speed (blocks/s), z cloud time (s), w shell base altitude (km).
+    //   cloudLook1: x shell bottom Y (rebased blocks), y shell top Y (rebased blocks),
+    //               z density scale, w enabled (0/1).
+    //   cloudLook2: x quality tier (0 performance, 1 balanced, 2 flagship — drives noise LOD,
+    //               step caps and transmittance early-outs in cloud.slang), yzw reserved.
+    public float4   cloudLook0;
+    public float4   cloudLook1;
+    public float4   cloudLook2;
     public float4   sunUv;            // vanilla sun sprite atlas rect (u0,v0,u1,v1)
     public float4   moonUv;           // vanilla current-moon-phase sprite atlas rect
     public float4   waterParams;      // xyz linear ACEScg camera-biome water tint, w wave time (s)

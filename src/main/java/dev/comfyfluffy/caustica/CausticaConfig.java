@@ -63,6 +63,7 @@ public final class CausticaConfig {
             Rt.Reflex.ENABLED, Rt.Bloom.STRENGTH, Rt.Exposure.MODE, Rt.Tonemap.GAMMA, Rt.Tonemap.HUE_SHIFT,
             Rt.Tonemap.SATURATION, Rt.Lighting.SUN_COLOR_TEMP, Rt.Lighting.NIGHT_BRIGHTNESS, Rt.FrameStats.ENABLED,
             Rt.Screenshots.EXR_ENABLED, Rt.Hdr.ENABLED, Ngx.PATH,
+            Rt.Cloud.ENABLED, Rt.Cloud.QUALITY, Rt.Cloud.COVERAGE, Rt.Cloud.DENSITY, Rt.Cloud.WIND_SPEED,
             CausticaConfig.Rt.Water.WAVE_STRENGTH,
             CausticaConfig.Rt.Water.WAVE_HEIGHT,
             CausticaConfig.Rt.Water.WAVE_SPEED,
@@ -666,6 +667,32 @@ public final class CausticaConfig {
                     clampedFloat("caustica.rt.lighting.nightBrightness", "lighting.night-brightness", 0.5f, 0.1f, 1.0f);
 
             private Lighting() {
+            }
+        }
+
+        /**
+         * Volumetric clouds — the Tier S path-traced heterogeneous medium (see
+         * {@code shaders/pipelines/world/cloud.slang}). The shell sits 1.5–8 km above sea level at
+         * the renderer's 100-blocks-per-km scale; density is a Nubis weather-map field sampled by
+         * position and transported with delta tracking + residual ratio tracking.
+         */
+        public static final class Cloud {
+            public static final BooleanSetting ENABLED = bool("caustica.rt.cloud", "cloud.enabled", true);
+            // Quality tier: 0 = performance (no erosion, shortest marches), 1 = balanced (default),
+            // 2 = flagship (full 27-cell Worley erosion, longest marches, exact event shadows).
+            public static final IntSetting QUALITY =
+                    clampedInt("caustica.rt.cloud.quality", "cloud.quality", 1, 0, 2);
+            // Weather coverage baseline 0..1; Minecraft's rain level lifts it further (up to +0.35).
+            public static final FloatSetting COVERAGE =
+                    clampedFloat("caustica.rt.cloud.coverage", "cloud.coverage", 0.42f, 0.0f, 1.0f);
+            // Peak extinction multiplier; 1.0 = CLOUD_MAX_SIGMA (0.35 / block).
+            public static final FloatSetting DENSITY =
+                    clampedFloat("caustica.rt.cloud.density", "cloud.density", 1.0f, 0.1f, 2.0f);
+            // Trade-wind speed in blocks per second (weather advection + shape shear).
+            public static final FloatSetting WIND_SPEED =
+                    clampedFloat("caustica.rt.cloud.windSpeed", "cloud.wind-speed", 6.0f, 0.0f, 30.0f);
+
+            private Cloud() {
             }
         }
 

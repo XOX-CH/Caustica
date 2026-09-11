@@ -30,6 +30,7 @@ import trace_ser;
 #endif
 import lighting;
 import sky;
+import cloud;
 import bindings;
 
 // Atmospheric transmittance LUT (RtSkyLut), also bound to world.rmiss at the same binding: raygen reads it
@@ -69,6 +70,10 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
     // diffuse-sampled continuation rays — those are already covered by the sun NEE, so the tiny disc
     // would be a double-counted firefly. Reset true on every specular/water bounce, false on a diffuse one.
     bool showCelestial = seg.showCelestial;
+    // Cloud-medium state: a cloud scattering event consumes one bounce budget slot and continues the
+    // loop from the event point (one cloud event = one loop iteration). `inCloudMass` tracks whether
+    // the path is still inside the same cloud mass so the MS LUT is charged once per encounter.
+    bool inCloudMass = false;
     // Pass B treats every hit it sees as one indirect-depth step, regardless of material or selected
     // continuation lobe. Deliberately start at zero instead of seg.bounce: the first hit of either
     // queued split branch is still the primary-terminal shading point. Hits 0 and 1 retain SSS; RIS
@@ -99,6 +104,34 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
                 break;
             }
 
+            // Cloud shell integration for the segment that escapes to sky: in-medium scattering
+            // events continue the loop (each consumes one bounce slot); a clean passthrough
+            // attenuates the sky radiance by the ratio-tracked shell transmittance. This is where
+            // backlit silver linings and sun-through-cloud god rays are produced.
+            {
+                float tEnter, tExit;
+                if (cloudShellInterval(ro, rd, 10000.0, tEnter, tExit)) {
+                    float3 cloudTrans;
+                    float3 segOrigin, segDir;
+                    int budget = maxBounces - bounce;
+                    CloudOutcome outcome = cloudIntegrate(ro, rd, 10000.0, tEnter, tExit,
+                            !inCloudMass, throughput, L, seed, budget,
+                            cloudTrans, segOrigin, segDir);
+                    if (outcome == CloudOutcome.SCATTERED) {
+                        ro = segOrigin;
+                        rd = segDir;
+                        showCelestial = false; // direct light was just handled by the in-scatter NEE
+                        inCloudMass = true;
+                        continue;
+                    }
+                    if (outcome == CloudOutcome.TERMINATED) {
+                        break;
+                    }
+                    throughput *= cloudTrans;
+                }
+            }
+            inCloudMass = false;
+
             // world.rmiss writes sky radiance (gradient + sun/moon disc + stars) into the payload's
             // surface words as a full float3, so this is absolute scene units with nothing to undo. The
             // packed show-celestial flag decides whether this path segment may see the bright disc.
@@ -110,6 +143,36 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
             }
             break;
         }
+
+        // Cloud shell integration between surface hits, before the hit is consumed: a scattering
+        // event inside the shell replaces the surface segment with a phase-sampled continuation
+        // (god rays between clouds, cloud GI); a clean passthrough attenuates the radiance on its
+        // way to the surface. NOTE: segments consumed by pass A's dielectric split (camera ->
+        // first water/glass face) never retrace here, so a cloud crossed on exactly that prefix is
+        // not attenuated — a rare above-cloud-base-to-water path accepted for now.
+        {
+            float tEnter, tExit;
+            if (cloudShellInterval(ro, rd, payload.hitT, tEnter, tExit)) {
+                float3 cloudTrans;
+                float3 segOrigin, segDir;
+                int budget = maxBounces - bounce;
+                CloudOutcome outcome = cloudIntegrate(ro, rd, payload.hitT, tEnter, tExit,
+                        !inCloudMass, throughput, L, seed, budget,
+                        cloudTrans, segOrigin, segDir);
+                if (outcome == CloudOutcome.SCATTERED) {
+                    ro = segOrigin;
+                    rd = segDir;
+                    showCelestial = false;
+                    inCloudMass = true;
+                    continue; // the loop's own increment charges the bounce budget once
+                }
+                if (outcome == CloudOutcome.TERMINATED) {
+                    break;
+                }
+                throughput *= cloudTrans;
+            }
+        }
+        inCloudMass = false;
 
         // Beer–Lambert: attenuate along the segment just travelled by the medium it lay inside. Applies
         // to every hit reached while inside a volume dielectric (its own exit face, or whatever content
@@ -217,7 +280,7 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
             float ndl = abs(signedNdl);
             if (ndl > 0.0) {
                 float3 shadowOrigin = hitPos + (signedNdl >= 0.0 ? n : -n) * SURF_BIAS;
-                float3 vis = visibility(shadowOrigin, lightDir, 10000.0).transmittance;
+                float3 vis = visibility(shadowOrigin, lightDir, 10000.0, seed).transmittance;
                 if (max(vis.r, max(vis.g, vis.b)) > 0.0) {
                     L += throughput * albedo * INV_PI * celestialLight.illuminance * ndl * vis;
                 }
@@ -296,7 +359,7 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
         }
         float ndl = max(0.0, dot(n, lightDir));
         if (ndl > 0.0) {
-            VisibilityResult shadow = visibility(p, lightDir, 10000.0);
+            VisibilityResult shadow = visibility(p, lightDir, 10000.0, seed);
             float3 vis = shadow.transmittance;
             // Underwater receiver whose shadow ray crossed a water surface: scale the direct light by
             // the wave-refraction caustic at the exit point. Focusing scales the incident irradiance,
@@ -349,7 +412,7 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
         if (sss > 0.0 && hitDepth <= MAX_SSS_INDIRECT_DEPTH) {
             float backNdl = max(0.0, dot(-n, lightDir));
             if (backNdl > 0.0) {
-                VisibilityResult shadowBack = visibility(hitPos - n * SURF_BIAS, lightDir, 10000.0);
+                VisibilityResult shadowBack = visibility(hitPos - n * SURF_BIAS, lightDir, 10000.0, seed);
                 float3 visB = shadowBack.transmittance;
                 // Same caustic as the front-face NEE — underwater kelp/seagrass transmission should
                 // flicker with the same light bands as the floor around it.

@@ -60,6 +60,7 @@ import dev.comfyfluffy.caustica.rt.material.RtMaterialRegistry;
 import dev.comfyfluffy.caustica.rt.pipeline.RtDebugPresentPipeline;
 import dev.comfyfluffy.caustica.rt.pipeline.RtBloomPipeline;
 import dev.comfyfluffy.caustica.rt.pipeline.RtSkyLut;
+import dev.comfyfluffy.caustica.rt.pipeline.RtCloudLut;
 import dev.comfyfluffy.caustica.rt.pipeline.RtDisplayPipeline;
 import dev.comfyfluffy.caustica.rt.pipeline.RtDlssFg;
 import dev.comfyfluffy.caustica.rt.pipeline.RtDlssRr;
@@ -177,6 +178,7 @@ public final class RtComposite {
     // Atmosphere LUTs (transmittance + multiple scattering + this frame's sky view). Device-lifetime; the
     // two static tables are baked on the first frame that records the pass.
     private RtSkyLut skyLut;
+    private RtCloudLut cloudLut;
     private RtDebugPresentPipeline debugPresentPipeline;
     private RtToneLut sdrToneLut;
     private RtToneLut hdrToneLut;
@@ -599,6 +601,9 @@ public final class RtComposite {
                 // fires if render() somehow runs before the tick-driven ensureResourcesReady has, which
                 // ensureWorld's own binding order otherwise guarantees never happens.
                 skyLut = RtSkyLut.create(ctx);
+                if (cloudLut == null) {
+                    cloudLut = RtCloudLut.create(ctx);
+                }
             }
             if (debugPresentPipeline == null) {
                 debugPresentPipeline = RtDebugPresentPipeline.create(ctx);
@@ -714,6 +719,9 @@ public final class RtComposite {
             // (VUID-vkCmdTraceRaysKHR-None-08114).
             if (skyLut == null) {
                 skyLut = RtSkyLut.create(ctx);
+                if (cloudLut == null) {
+                    cloudLut = RtCloudLut.create(ctx);
+                }
             }
             bindlessTextureCapacity = RtEntityTextures.maxTextures();
             worldPipeline = RtPipeline.create(ctx, new String[]{
@@ -790,6 +798,10 @@ public final class RtComposite {
             if (skyLut != null) {
                 worldPipeline.setSkyLuts(skyLut.skyViewView(), skyLut.transmittanceView(),
                         skyLut.sampler());
+                if (cloudLut != null) {
+                    worldPipeline.setCloudTextures(cloudLut.weatherView(), cloudLut.msLutView(),
+                            cloudLut.macroGridView(), cloudLut.sampler());
+                }
             }
         }
         setCelestialUvAtlas(celView);
@@ -1126,6 +1138,33 @@ public final class RtComposite {
             // resolved slot rides along with the uploadPending() call right below.
             BreakEntry[] breaking = breakingEntries(terrain);
             SkyPush sky = skyPush();
+
+            // Volumetric cloud state (see shaders/pipelines/world/cloud.slang). The shell rides at
+            // world altitudes 1.5-8 km above sea level (100 blocks = 1 km, the atmosphere's own
+            // exaggerated scale), pushed in rebased blocks so the shader's ray origins compare
+            // against it directly. Coverage folds the config baseline with Minecraft's rain level:
+            // storms pile the sky while clear days stay sparse. Wind and time use the same
+            // monotonic clock as the water waves so every animated medium shares one timeline.
+            Minecraft mcCloud = Minecraft.getInstance();
+            float cloudPartial = mcCloud.getDeltaTracker().getGameTimeDeltaPartialTick(false);
+            int cloudSeaLevel = mcCloud.level != null ? mcCloud.level.getSeaLevel() : 62;
+            float cloudRain = mcCloud.level != null ? mcCloud.level.getRainLevel(cloudPartial) : 0f;
+            float cloudCoverage = Math.clamp(
+                    CausticaConfig.Rt.Cloud.COVERAGE.value() + cloudRain * 0.35f, 0.0f, 1.0f);
+            float cloudBaseAltitudeKm = 1.5f;
+            float cloudTopAltitudeKm = 8.0f;
+            float cloudBaseRebased = (cloudSeaLevel + cloudBaseAltitudeKm * 100.0f) - terrain.blockY;
+            float cloudTopRebased = (cloudSeaLevel + cloudTopAltitudeKm * 100.0f) - terrain.blockY;
+            float cloudTime = (float) (System.nanoTime() / 1.0e9 % 3600.0);
+            Float4 cloudLook0 = new Float4(cloudCoverage,
+                    CausticaConfig.Rt.Cloud.WIND_SPEED.value(), cloudTime, cloudBaseAltitudeKm);
+            Float4 cloudLook1 = new Float4(cloudBaseRebased, cloudTopRebased,
+                    CausticaConfig.Rt.Cloud.DENSITY.value(),
+                    CausticaConfig.Rt.Cloud.ENABLED.value() ? 1.0f : 0.0f);
+            // cloudLook2.x = quality tier (0 performance / 1 balanced / 2 flagship); the shader
+            // derives noise LOD, step caps and transmittance early-outs from it.
+            Float4 cloudLook2 = new Float4(
+                    (float) CausticaConfig.Rt.Cloud.QUALITY.value(), 0.0f, 0.0f, 0.0f);
             new WorldPushData(
                     frameInvViewProj,
                     new Float3((float) (camX - terrain.blockX), (float) (camY - terrain.blockY),
@@ -1143,6 +1182,9 @@ public final class RtComposite {
                     sky.look2(),
                     sky.look3(),
                     sky.look4(),
+                    cloudLook0,
+                    cloudLook1,
+                    cloudLook2,
                     sky.sunUv(),
                     sky.moonUv(),
                     waterParams,
@@ -1236,6 +1278,16 @@ public final class RtComposite {
                 skyLut.record(cmd, pushBuf.deviceAddress);
             }
             VulkanCommandEncoder.memoryBarrier(cmd, stack); // sky LUT writes visible to raygen/miss
+
+            // Cloud bakes: weather map + macrogrid per frame (cheap 128²/32² passes), the
+            // multiple-scattering LUT once. Same WorldPush slot as the trace, so the weather the
+            // clouds shade with and the frame's rain/wind state can never disagree.
+            if (cloudLut != null) {
+                try (RtFrameStats.Scope ignored = RtFrameStats.FRAME.stage("frame.cloudLut")) {
+                    cloudLut.record(cmd, pushBuf.deviceAddress);
+                }
+                VulkanCommandEncoder.memoryBarrier(cmd, stack); // cloud bakes visible to raygen/miss
+            }
 
             try (RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "world primary trace");
                  RtFrameStats.Scope ignoredStats = RtFrameStats.FRAME.stage("frame.tracePrimary")) {
@@ -1555,6 +1607,10 @@ public final class RtComposite {
         if (skyLut != null) {
             skyLut.destroy();
             skyLut = null;
+        }
+        if (cloudLut != null) {
+            cloudLut.destroy();
+            cloudLut = null;
         }
         if (debugPresentPipeline != null) {
             debugPresentPipeline.destroy();

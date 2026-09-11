@@ -1,0 +1,63 @@
+{
+  "outputs": [
+    {
+      "path": "a:\\Caustica\\docs\\volumetric-clouds-research.html",
+      "type": "html",
+      "editable": true
+    }
+  ],
+  "source_files": [
+    "a:\\Caustica\\shaders\\pipelines\\world\\sky.slang",
+    "a:\\Caustica\\shaders\\pipelines\\world\\medium.slang",
+    "a:\\Caustica\\shaders\\pipelines\\world\\lighting.slang",
+    "a:\\Caustica\\shaders\\pipelines\\world\\segment.slang",
+    "a:\\Caustica\\README.md"
+  ],
+  "acceptance_items": [
+    {
+      "quote": "必需完整理解此项目核心然后分析体积云实现的最高规格画面组合论文级别研究分析 最新最适合的算法",
+      "expected": "HARD | 报告必须包含：Caustica 项目核心理解、体积云物理基础、云形状建模技术、渲染算法谱系（raymarch 派与路径追踪派）、2021-2026 最新算法（Volumetric ReSTIR、decomposition/ratio tracking、近似 Mie、神经方法、Ghost ReSTIR 等）、工业界方案对比、面向 Caustica 的最高规格画面组合选型与集成设计",
+      "final_check": "PASS | 脚本验证含 8 个章节（01 项目理解 / 02 物理基础 / 03 形状建模 / 04 两派谱系 / 05 最新算法 / 06 工业界对比 / 07 最高规格组合 / 08 风险预算），关键算法关键词全部命中（decomposition tracking、residual ratio、HG+Draine、Volumetric ReSTIR、Ghost ReSTIR、RCPG、Nubis 等）"
+    },
+    {
+      "quote": "论文级别研究分析",
+      "expected": "HARD | 报告须为论文级深度：含算法原理、公式、定量数据（性能/质量数字）、30 项以上参考文献/工作的引用链接，关键论断有一手来源 URL",
+      "final_check": "PASS | 43 条参考文献、42 个外部 URL、43 处内联引用且锚点一一对应；含 RTE/Beer-Lambert 公式块与定量数据（297.7ms→2.4ms、95% Mie 拟合、1spp vs 4-13spp、3.7ms PSNR22.3、2ms/20MB 等），关键数字均在文内"
+    },
+    {
+      "quote": "全程中文输出",
+      "expected": "HARD | 报告正文为中文（技术术语可保留英文原名）",
+      "final_check": "PASS | 提取可见文本统计 CJK 字符 7436 个，正文为中文叙述，英文仅为术语/代码/文献名"
+    },
+    {
+      "quote": "最高规格画面组合 + 最新最适合的算法",
+      "expected": "HARD | 必须给出针对 Caustica（Vulkan 硬件路径追踪 + Slang + DLSS-RR + Hillaire 大气 LUT + 100 blocks/km）的具体算法选型组合、分档方案（旗舰/性价比）与落地集成点（模块/着色器级）",
+      "final_check": "PASS | 第 7 章含 Tier S/A/B 分档选型表、三阶段落地路线、具体集成点表（cloud.slang 新增、medium.slang 扩展、primary/indirect.rgen 段积分、trace.slang visibility、sky.rmiss、RtCloudLut、en_us/zh_cn 本地化），均引用项目实际模块名"
+    }
+  ],
+  "claims": [
+    {
+      "id": "c1",
+      "text": "Caustica 是 Minecraft 26.2 Vulkan 后端的硬件路径追踪渲染器，Slang 着色器，双 pass path tracing，Hillaire 2020 大气三 LUT，DLSS-RR/FG，TODO 含 volumetric fog/clouds",
+      "evidence": "README.md 与 shaders/pipelines/world/sky.slang、medium.slang、segment.slang 直接读取"
+    },
+    {
+      "id": "c2",
+      "text": "Jendersie & d'Eon 2023：HG+Draine 混合相位可拟合 95% Mie 相位函数，支持解析求值与采样",
+      "evidence": "https://research.nvidia.com/labs/rtr/approximate-mie/ 项目页与论文摘要"
+    },
+    {
+      "id": "c3",
+      "text": "Volumetric ReSTIR (Lin/Wyman/Yuksel, SIGGRAPH Asia 2021)：每像素仅 1 条路径样本即可达到 baseline 4-13 spp 的等效质量；baseline 为 decomposition tracking + residual ratio tracking",
+      "evidence": "https://graphics.cs.utah.edu/research/projects/volumetric-restir/ 项目页"
+    },
+    {
+      "id": "c4",
+      "text": "Deep Scattering (Kallweit et al., SIGGRAPH Asia 2017) 用层次化 3D descriptor + 神经网络预测云辐射度，数秒到数分钟生成接近参考解的云图像",
+      "evidence": "https://la.disneyresearch.com/publication/deep-scattering/"
+    }
+  ],
+  "target_scope": {
+    "required": false
+  }
+}

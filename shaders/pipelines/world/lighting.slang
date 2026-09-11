@@ -315,7 +315,15 @@ public float3 shadeReservoir(Reservoir s, float3 hitPos, float3 n, float3 v, flo
     float3 toL = s.pos - origin;
     float dist = length(toL);
     // Stop just short of the sample point so the ray doesn't self-occlude on the emitter's own face.
-    VisibilityResult shadow = visibility(origin, toL / dist, dist * 0.999);
+    // No RNG in reservoir shading: derive a stable jitter seed from the sample geometry so the
+    // cloud-transmittance quadrature inside visibility() still decorrelates between samples.
+    // Quantized float->uint casts (offset keeps negatives finite under truncation).
+    float3 seedPos = s.pos * float3(1.0, 31.0, 1023.0) + 65536.0;
+    uint seedMixed = uint(seedPos.x) * 73856093u
+            ^ uint(seedPos.y) * 19349663u
+            ^ uint(seedPos.z) * 83492791u;
+    uint jitterSeed = pcg(seedMixed);
+    VisibilityResult shadow = visibility(origin, toL / dist, dist * 0.999, jitterSeed);
     float3 vis = shadow.transmittance;
     return contrib * vis * s.W;
 }

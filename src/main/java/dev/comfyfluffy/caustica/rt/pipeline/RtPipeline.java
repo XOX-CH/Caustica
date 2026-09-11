@@ -168,6 +168,14 @@ public final class RtPipeline {
                     .descriptorType(VK10.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
                     .descriptorCount(1)
                     .stageFlags(VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_RAYGEN_BIT_KHR);
+            // Volumetric cloud inputs (RtCloudLut): weather map, MS LUT, macrogrid. Raygen-only —
+            // clouds are an implicit medium queried by position in the two rgen stages and in
+            // visibility(), never in hit shaders.
+            for (int binding = WORLD_CLOUD_WEATHER; binding <= WORLD_CLOUD_MACROGRID; binding++) {
+                binds.get(binding).binding(binding)
+                        .descriptorType(VK10.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+                        .descriptorCount(1).stageFlags(VK_SHADER_STAGE_RAYGEN_BIT_KHR);
+            }
             VkDescriptorSetLayoutCreateInfo dslci = VkDescriptorSetLayoutCreateInfo.calloc(stack).sType$Default().pBindings(binds);
             LongBuffer p = stack.mallocLong(1);
             check(VK10.vkCreateDescriptorSetLayout(vk, dslci, null, p), "vkCreateDescriptorSetLayout");
@@ -450,6 +458,13 @@ public final class RtPipeline {
     public void setSkyLuts(long skyViewImageView, long transmittanceImageView, long sampler) {
         writeAtlasBinding(WORLD_SKY_VIEW, skyViewImageView, sampler);
         writeAtlasBinding(WORLD_TRANSMITTANCE, transmittanceImageView, sampler);
+    }
+
+    /** Bind the cloud bake images (see {@link RtCloudLut}); all share the cloud sampler. */
+    public void setCloudTextures(long weatherView, long msLutView, long macroGridView, long sampler) {
+        writeAtlasBinding(WORLD_CLOUD_WEATHER, weatherView, sampler);
+        writeAtlasBinding(WORLD_CLOUD_MS_LUT, msLutView, sampler);
+        writeAtlasBinding(WORLD_CLOUD_MACROGRID, macroGridView, sampler);
     }
 
     private void writeAtlasBinding(int binding, long imageView, long sampler) {

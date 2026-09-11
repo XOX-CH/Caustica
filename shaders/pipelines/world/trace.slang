@@ -6,6 +6,7 @@
 import world_common;
 import world_core;
 import bindings;
+import cloud;
 
 public static const uint CULL_SECONDARY = 0x01u;
 public static const uint CULL_PRIMARY = 0x02u;
@@ -96,7 +97,7 @@ public Payload makeShadowPayload() {
     return shadowPayload;
 }
 
-public VisibilityResult visibility(float3 origin, float3 dir, float tmax) {
+public VisibilityResult visibility(float3 origin, float3 dir, float tmax, inout uint seed) {
     // Vulkan requires an identical payload structure for every stage reachable by this trace. The shadow
     // path uses only the albedo view as accumulated transmittance and hitT as the nearest-water crossing.
     Payload shadowPayload = makeShadowPayload();
@@ -112,6 +113,16 @@ public VisibilityResult visibility(float3 origin, float3 dir, float tmax) {
     result.transmittance = shadowPayload.flags == 0u
             ? unpackAlbedo(shadowPayload) : float3(0.0, 0.0, 0.0);
     result.waterHitT = shadowPayload.hitT;
+    // Cloud-shell transmittance along the same shadow ray: terrain cloud shadows, cloud
+    // self-shadowing for the in-scatter NEE, and god-ray shadowing all come from this one term.
+    // Clouds are implicit media (not in the TLAS), so the traversal above cannot see them.
+    // Skipped entirely when the TLAS traversal already returned fully blocked — the multiply
+    // could not change a zero, and the walk is the single most expensive part of this call
+    // (forests and caves block most of their shadow rays outright). The shell-interval test
+    // early-outs the rest (one macrogrid fetch when the segment never reaches the shell).
+    if (max(result.transmittance.r, max(result.transmittance.g, result.transmittance.b)) > 0.0) {
+        result.transmittance *= cloudTransmittance(origin, dir, tmax, seed);
+    }
     return result;
 }
 

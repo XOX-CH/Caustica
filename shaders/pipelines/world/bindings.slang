@@ -20,6 +20,15 @@ import world_common;
 [[vk::binding(10, 0)]] public Sampler2D skyViewLut;
 [[vk::binding(11, 0)]] public Sampler2D transmittanceLut;
 
+// Volumetric cloud inputs (RtCloudLut): the weather map (R coverage / G type), the
+// multiple-scattering LUT (RGB per-unit-illuminance higher-order response, A ambient factor),
+// and the per-column majorant grid (R = max coverage). All are raygen-side only: clouds are an
+// implicit medium queried by position in world.rgen and trace.slang's visibility, never in the
+// hit shaders.
+[[vk::binding(12, 0)]] public Sampler2D cloudWeatherTex;
+[[vk::binding(13, 0)]] public Sampler2D cloudMultiScatterLut;
+[[vk::binding(14, 0)]] public Sampler2D cloudMacroGrid;
+
 [[vk::binding(0, 1)]] public Sampler2D entityAlbedoTex[];
 [[vk::binding(1, 1)]] public Sampler2D materialSurface0Tex[];
 [[vk::binding(2, 1)]] public Sampler2D materialNormalAoTex[];
