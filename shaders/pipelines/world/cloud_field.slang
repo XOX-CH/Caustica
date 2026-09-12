@@ -35,20 +35,22 @@ public static const float CLOUD_ALBEDO = 0.96;
 // Mean droplet diameter for the Mie fit, microns (10–15 µm is typical boundary-layer cumulus).
 public static const float CLOUD_DROPLET_UM = 12.0;
 // Weather texture spans this many blocks per tile (wraps in XZ). 8192 ≈ 82 km — the Nubis
-// weather-cell order of magnitude at Minecraft scale. Keep texel/cell counts in sync with
-// RtCloudLut (WEATHER_SIZE / MACROGRID_SIZE).
+// weather-cell order of magnitude at Minecraft scale. Keep the cell count in sync with
+// RtCloudLut.MACROGRID_SIZE.
 public static const float CLOUD_WEATHER_SPAN = 8192.0;
-public static const float CLOUD_WEATHER_TEXELS = 128.0;
 public static const float CLOUD_MACROGRID_CELLS = 32.0;
 public static const float CLOUD_MACRO_CELL = CLOUD_WEATHER_SPAN / CLOUD_MACROGRID_CELLS;
 // Shape/erosion noise frequencies, cycles per block.
 public static const float CLOUD_SHAPE_FREQ = 1.0 / 110.0;
 public static const float CLOUD_EROSION_FREQ = 1.0 / 15.0;
 public static const float CLOUD_EROSION_STRENGTH = 0.42;
-// Multiplier on the MS LUT's higher-order and ambient terms (bake normalisation calibration).
+// Multiplier on the MS LUT's higher-order and ambient terms only. The order-1 NEE term is not
+// scaled by it (bake normalisation calibration).
 public static const float CLOUD_MS_STRENGTH = 1.0;
-// In-medium scattering bounces per encounter; higher orders leak into the MS LUT.
-public static const int CLOUD_MAX_BOUNCES = 6;
+// Optical-depth ceiling of the MS LUT's v axis, in the same σt units the runtime's tau uses.
+// cloud_lut/mslut.comp bins the baked fluence against it and cloud.slang normalises the runtime
+// lookup by the same number, so the two can never disagree.
+public static const float CLOUD_MS_LUT_TAU_MAX = 32.0;
 
 // ---- Phase: HG + Draine approximate Mie (Jendersie & d'Eon 2023) ---------------------------------
 //
@@ -169,9 +171,10 @@ public float valueNoise3(float3 p) {
             lerp(lerp(n001, n101, f.x), lerp(n011, n111, f.x), f.y), f.z);
 }
 
-// Worley (cellular) noise, single jitter per cell, distance to the nearest feature point,
-// remapped so 0 = cell centre and 1 = far from every feature. One hash triplet per neighbour.
-public float worley3(float3 p) {
+// 27-cell Worley (full 3x3x3 search), single jitter per cell, distance to the nearest feature
+// point, remapped so 0 = cell centre and 1 = far from every feature. One hash triplet per
+// neighbour.
+public float worley3x27(float3 p) {
     float3 i = floor(p);
     float3 f = frac(p);
     float best = 8.0;
@@ -190,10 +193,10 @@ public float worley3(float3 p) {
     return saturate(1.0 - sqrt(best) * 0.9);
 }
 
-// 2x2x2-neighbourhood Worley: drops the far corners of the cell search, a third of the hashes.
-// The field reads smoother (the nearest feature can hide in a skipped corner), which erosion
-// tolerates — it only subtracts, never adds. The balanced quality tier's erosion.
-public float worley3Cheap(float3 p) {
+// 8-cell Worley (2x2x2 neighbourhood): drops the far corners of the cell search, a third of the
+// hashes. The field reads smoother (the nearest feature can hide in a skipped corner), which
+// erosion tolerates — it only subtracts, never adds. The balanced quality tier's erosion.
+public float worley3x8(float3 p) {
     float3 i = floor(p - 0.5);
     float best = 8.0;
     for (int z = 0; z <= 1; z++) {
@@ -224,15 +227,23 @@ public float fbm3(float3 p, int octaves) {
     return sum / max(norm, 1.0e-6);
 }
 
-public float cloudRemap(float v, float lo, float hi, float nlo, float nhi) {
-    return nlo + saturate((v - lo) / max(hi - lo, 1.0e-6)) * (nhi - nlo);
+// Remap v from [lo, hi] onto [0, 1] with saturation. Every call site wants the unit range, so the
+// general two-range form is not carried.
+public float cloudRemap(float v, float lo, float hi) {
+    return saturate((v - lo) / max(hi - lo, 1.0e-6));
 }
 
 // Constant trade-wind direction: stability across frames matters more than variety, and the
-// weather bake advects with the same vector so shapes move coherently. Pure (no WorldPush) so
-// bake passes and the runtime share it.
-public float2 cloudWindDirStatic() {
-    return normalize(float2(0.86, 0.51));
+// weather bake advects with the same vector so shapes move coherently. Stored pre-normalised
+// (normalize(float2(0.86, 0.51))) because Slang's normalize is not a constant expression.
+public static const float2 CLOUD_WIND_DIR = float2(0.860129, 0.510077);
+
+// Horizontal weather-domain advection in blocks, from (wind speed, blocks/s; cloud time, s).
+// One implementation for the runtime shape scroll and both weather bakes, because the bake passes
+// hold their own WorldPush copy and cannot read the runtime's global — the caller passes the pair
+// explicitly so all three sites cannot drift apart.
+public float2 cloudWindOffset(float2 windSpeedAndTime) {
+    return CLOUD_WIND_DIR * max(windSpeedAndTime.x, 0.0) * windSpeedAndTime.y;
 }
 
 // ---- Weather field ------------------------------------------------------------------------------
@@ -293,9 +304,9 @@ public float weatherTypeField(float2 uv, float2 windOffsetBlocks) {
 // Height profile: flat eroded bases, rounded tops; type stretches the vertical extent from thin
 // stratus to full cumulus. 0..1 vertical support at this height fraction.
 public float heightProfile(float hf, float type) {
-    float base = cloudRemap(hf, 0.0, 0.04 + 0.10 * type, 0.0, 1.0);
+    float base = cloudRemap(hf, 0.0, 0.04 + 0.10 * type);
     float topStart = lerp(0.28, 0.62, type);
     float topEnd = lerp(0.42, 1.0, type);
-    float top = 1.0 - cloudRemap(hf, topStart, topEnd, 0.0, 1.0);
+    float top = 1.0 - cloudRemap(hf, topStart, topEnd);
     return base * top;
 }

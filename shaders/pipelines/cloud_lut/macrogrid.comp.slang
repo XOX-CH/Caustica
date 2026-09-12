@@ -11,7 +11,7 @@ import cloud_lut_bindings;
 
 [[vk::push_constant]] PushAddr pcAddr;
 
-// Keep in sync with cloud.CLOUD_MACROGRID_CELLS and RtCloudLut.MACROGRID_SIZE.
+// Keep in sync with cloud_field.CLOUD_MACROGRID_CELLS and RtCloudLut.MACROGRID_SIZE.
 static const int MACROGRID_SIZE = 32;
 static const int WEATHER_TEXELS_PER_CELL = 4; // 128 weather texels / 32 cells
 
@@ -22,7 +22,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
         return;
     }
     WorldPush push = ConstPtr<WorldPush>(pcAddr.worldPushAddr)[0];
-    float2 windOffset = cloudWindDirStatic() * max(push.cloudLook0.y, 0.0) * push.cloudLook0.z;
+    float2 windOffset = cloudWindOffset(push.cloudLook0.yz);
     float bias = saturate(push.cloudLook0.x);
     float maxCoverage = 0.0;
     for (int y = 0; y < WEATHER_TEXELS_PER_CELL; y++) {

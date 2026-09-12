@@ -111,23 +111,22 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
             {
                 float tEnter, tExit;
                 if (cloudShellInterval(ro, rd, 10000.0, tEnter, tExit)) {
-                    float3 cloudTrans;
-                    float3 segOrigin, segDir;
-                    int budget = maxBounces - bounce;
-                    CloudOutcome outcome = cloudIntegrate(ro, rd, 10000.0, tEnter, tExit,
-                            !inCloudMass, throughput, L, seed, budget,
-                            cloudTrans, segOrigin, segDir);
-                    if (outcome == CloudOutcome.SCATTERED) {
-                        ro = segOrigin;
-                        rd = segDir;
+                    CloudPathState state = cloudPathState(throughput, L, seed, maxBounces - bounce);
+                    CloudSegment seg = cloudIntegrate(ro, rd, tEnter, tExit, inCloudMass, state);
+                    throughput = state.throughput;
+                    L = state.luminance;
+                    seed = state.seed;
+                    if (seg.outcome == CloudOutcome.SCATTERED) {
+                        ro = seg.segOrigin;
+                        rd = seg.segDir;
                         showCelestial = false; // direct light was just handled by the in-scatter NEE
                         inCloudMass = true;
                         continue;
                     }
-                    if (outcome == CloudOutcome.TERMINATED) {
+                    if (seg.outcome == CloudOutcome.TERMINATED) {
                         break;
                     }
-                    throughput *= cloudTrans;
+                    throughput *= seg.transmittance;
                 }
             }
             inCloudMass = false;
@@ -153,23 +152,22 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
         {
             float tEnter, tExit;
             if (cloudShellInterval(ro, rd, payload.hitT, tEnter, tExit)) {
-                float3 cloudTrans;
-                float3 segOrigin, segDir;
-                int budget = maxBounces - bounce;
-                CloudOutcome outcome = cloudIntegrate(ro, rd, payload.hitT, tEnter, tExit,
-                        !inCloudMass, throughput, L, seed, budget,
-                        cloudTrans, segOrigin, segDir);
-                if (outcome == CloudOutcome.SCATTERED) {
-                    ro = segOrigin;
-                    rd = segDir;
+                CloudPathState state = cloudPathState(throughput, L, seed, maxBounces - bounce);
+                CloudSegment seg = cloudIntegrate(ro, rd, tEnter, tExit, inCloudMass, state);
+                throughput = state.throughput;
+                L = state.luminance;
+                seed = state.seed;
+                if (seg.outcome == CloudOutcome.SCATTERED) {
+                    ro = seg.segOrigin;
+                    rd = seg.segDir;
                     showCelestial = false;
                     inCloudMass = true;
                     continue; // the loop's own increment charges the bounce budget once
                 }
-                if (outcome == CloudOutcome.TERMINATED) {
+                if (seg.outcome == CloudOutcome.TERMINATED) {
                     break;
                 }
-                throughput *= cloudTrans;
+                throughput *= seg.transmittance;
             }
         }
         inCloudMass = false;
