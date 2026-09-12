@@ -53,13 +53,14 @@ import dev.comfyfluffy.caustica.rt.terrain.RtTerrain;
  * RtDeviceBringup#maxLineWidth()}) — clamped to whatever the device actually supports (Vulkan mandates
  * exactly 1.0 without the feature, so this degrades gracefully rather than failing).
  *
- * <p>Edge AA follows {@link RtGlowOutlineFeature}'s mask/composite split rather than drawing straight onto
- * {@code main}: the line list rasterizes at {@link RtDeviceBringup#overlayMsaaSamples()} into a transient
- * MSAA scratch attachment that dynamic rendering resolve-averages into a single-sample mask, then a tiny
- * composite pass alpha-blends that mask onto {@code main}. Since every line pixel is the same flat colour
- * (rgb = 0,0,0), per-sample coverage averages straight into a fractional alpha with no colour-bleed risk —
- * the occlusion {@code discard} in {@code block_outline/fragment.frag.slang} still runs once per fragment (not per sample,
- * no {@code sampleShading}), so occlusion itself stays pixel-rate; only the silhouette edges get antialiased.
+ * <p>Edge AA follows {@link RtGlowOutlineFeature}'s mask/composite split rather than drawing the lines
+ * themselves with blending: the line list rasterizes at {@link RtDeviceBringup#overlayMsaaSamples()} into a
+ * transient MSAA scratch attachment that dynamic rendering resolve-averages into a single-sample mask, then
+ * a tiny composite pass alpha-blends that mask onto {@link RtWorldOverlay}'s shared overlay buffer. Since
+ * every line pixel is the same flat colour (rgb = 0,0,0), per-sample coverage averages straight into a
+ * fractional alpha with no colour-bleed risk — the occlusion {@code discard} in
+ * {@code block_outline/fragment.frag.slang} still runs once per fragment (not per sample, no
+ * {@code sampleShading}), so occlusion itself stays pixel-rate; only the silhouette edges get antialiased.
  */
 final class RtBlockOutlineFeature implements RtOverlayFeature {
     // mat4 curViewProj (0, 64B) + vec3 camOffset (64, padded to 16B) + vec4 color (80, 16B) = 96B.
@@ -218,10 +219,9 @@ final class RtBlockOutlineFeature implements RtOverlayFeature {
                     .vertex(RtOverlayPipelines.VertexFormat.POSITION)
                     .topology(VK10.VK_PRIMITIVE_TOPOLOGY_LINE_LIST)
                     // NONE (straight write), not ALPHA: ALPHA's blend factors (srcAlpha=ZERO, dstAlpha=ONE)
-                    // preserve the DESTINATION's alpha, which was fine composited straight onto opaque `main`
-                    // (only RGB mattered) but is wrong now that this pass writes into a transparent scratch
-                    // mask whose alpha IS the coverage signal the composite pass reads — ALPHA here would
-                    // leave every resolved pixel's alpha stuck at the clear value (0), invisible outline.
+                    // preserve the DESTINATION's alpha, which would leave every resolved pixel's alpha stuck
+                    // at the clear value (0) — invisible outline — since this pass writes into a transparent
+                    // scratch mask whose alpha IS the coverage signal the composite pass reads.
                     .blend(RtOverlayPipelines.Blend.NONE)
                     .attachment(RtWorldOverlay.TARGET_FORMAT)
                     .samples(RtDeviceBringup.overlayMsaaSamples())

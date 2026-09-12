@@ -79,11 +79,18 @@ public struct WorldPush {
     //               y wind speed (blocks/s), z cloud time (s), w shell base altitude (km).
     //   cloudLook1: x shell bottom Y (rebased blocks), y shell top Y (rebased blocks),
     //               z density scale, w enabled (0/1).
-    //   cloudLook2: x quality tier (0 performance, 1 balanced, 2 flagship — drives noise LOD,
-    //               step caps and transmittance early-outs in cloud.slang), yzw reserved.
+    //   cloudLook2: x shape fBm octaves, y erosion neighbourhood (0 none / 1 eight-cell / 2
+    //               twenty-seven-cell), z event-shadow precision (0 Beer everywhere / 1 first event
+    //               exact / 2 exact everywhere), w reserved.
+    //   cloudLook3: x free-flight step cap, y shadow strides per transmittance walk, z stride
+    //               fraction of the remaining interval, w transmittance early-out floor. Both
+    //               vectors are resolved per parameter in cloud.slang, and none of them touches the
+    //               weather/macrogrid/MS-LUT bakes.
     public float4   cloudLook0;
     public float4   cloudLook1;
     public float4   cloudLook2;
+    public float4   cloudLook3;
+    public float4   cloudOrigin;      // xy terrain rebase origin world XZ (blocks), zw reserved
     public float4   sunUv;            // vanilla sun sprite atlas rect (u0,v0,u1,v1)
     public float4   moonUv;           // vanilla current-moon-phase sprite atlas rect
     public float4   waterParams;      // xyz linear ACEScg camera-biome water tint, w wave time (s)

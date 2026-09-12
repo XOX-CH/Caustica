@@ -32,25 +32,28 @@ import dev.comfyfluffy.caustica.rt.accel.RtImage;
 /**
  * The world-space overlay seam: full-res raster content prepared after the RT world has been upscaled
  * (nothing thin/crisp survives DLSS-RR, so overlays must not be traced/rastered at render res) and folded
- * into the shared transparent UI image before the hand/screen-effects/GUI layers draw over it. Called once
- * per frame from {@code GameRendererMixin} at the before-hand seam.
+ * into the frame's scene image before the hand/screen-effects/GUI layers draw over it. Called once per
+ * frame from {@code GameRendererMixin} at the before-hand seam.
  *
  * <p>This class owns the questions every overlay feature would otherwise re-answer: which image to
- * composite onto (a shared mod-owned overlay buffer — every feature draws into THAT, not the final UI
- * overlay directly, see {@link #overlayImage} below), the transient command buffer + inter-feature barriers,
+ * composite onto (a shared mod-owned overlay buffer — every feature draws into THAT, not a presented image
+ * directly, see {@link #overlayImage} below), the transient command buffer + inter-feature barriers,
  * per-frame vertex scratch ({@link RtOverlayFramePool}), and the failure latch. Features implement
  * {@link RtOverlayFeature}; pipelines come from {@link RtOverlayPipelines}.
  *
- * <p>Routing every feature through one shared buffer instead of blending straight onto vanilla's SDR
- * {@code main} keeps SDR/HDR presentation unified: {@link #record} folds that buffer into
- * {@link RtUiOverlay}'s transparent overlay before the vanilla GUI renders, so the GUI remains topmost and
- * the final present path only has one UI image to blend. The block outline applies its private MSAA
- * mask-resolve before its result reaches {@code overlayImage}; MSAA is the overlay edge-AA mechanism.
+ * <p>Routing every feature through one shared buffer keeps the two presentation modes uniform: {@link #record}
+ * makes one final composite of that buffer, onto vanilla's SDR {@code main} on the SDR present path or — via
+ * {@code RtComposite.compositeWorldOverlayIntoHdr} — over the PQ HDR scene image on the HDR present path.
+ * Both land the overlay in the image that is presented and that DLSS-FG snapshots as its hudless resource,
+ * so frame generation reconstructs it from scene motion vectors in either mode. The block outline applies
+ * its private MSAA mask-resolve before its result reaches {@code overlayImage}; MSAA is the overlay edge-AA
+ * mechanism.
  */
 public final class RtWorldOverlay {
     public static final RtWorldOverlay INSTANCE = new RtWorldOverlay();
 
-    /** The shared overlay buffer's + presented image's VkFormat ({@code GpuFormat.RGBA8_UNORM}). */
+    /** The shared overlay buffer's VkFormat ({@code GpuFormat.RGBA8_UNORM}) — the composite passes'
+     *  attachment format. The image the buffer is finally presented in is HDR-format on the HDR path. */
     public static final int TARGET_FORMAT = VK10.VK_FORMAT_R8G8B8A8_UNORM;
 
     private final RtOverlayFramePool framePool = new RtOverlayFramePool();
@@ -59,8 +62,9 @@ public final class RtWorldOverlay {
     private boolean failed;
 
     // Shared world-overlay buffer every feature composites into (lazily sized to main's width/height, same
-    // lazy-resize convention as e.g. RtGlowOutlineFeature's own private mask image). uiComposite* blends it
-    // into RtUiOverlay's transparent target; RtUiOverlay owns the one final SDR/HDR blend to the real target.
+    // lazy-resize convention as e.g. RtGlowOutlineFeature's own private mask image). uiComposite blends it
+    // onto the SDR main target; on the HDR present path the buffer is instead blended over the PQ scene image
+    // by RtComposite (which owns that pipeline and the paper-white compositing maths).
     private RtContext ctxRef;
     private RtImage overlayImage;
     private RtOverlayPipelines.Pipeline uiCompositePipeline;
@@ -70,9 +74,9 @@ public final class RtWorldOverlay {
     }
 
     /**
-     * Render every active world-overlay feature and fold it into {@link RtUiOverlay}'s shared transparent
-     * target. Called after the RT world composite and before the vanilla hand/screen-effects/GUI path can draw
-     * more UI layers into that same target.
+     * Render every active world-overlay feature and composite the result into this frame's scene image.
+     * Called after the RT world composite (which writes that image) and before the vanilla
+     * hand/screen-effects/GUI path can add its own layers, so the overlay is part of the scene DLSS-FG sees.
      */
     public void compositeIntoUiOverlay(RenderTarget main, RtGpuExecutor.GraphicsUse graphicsUse) {
         if (graphicsUse == null || failed || main == null || main.getColorTexture() == null || !RtUiOverlay.enabled()) {
@@ -91,18 +95,31 @@ public final class RtWorldOverlay {
             }
             if (!ready.isEmpty()) {
                 ensureOverlayBuffer(ctx, main.width, main.height);
-                // Composite the world overlay (block outline, glow outline, name tags) directly into the
-                // main render target so it appears in the FG hudless capture. Previously this composited into
-                // the UI overlay, which made outlines a static 2D image reused across all FG-generated frames
-                // — causing jitter as the camera moves. By putting outlines in the main target, FG can
-                // interpolate them using scene motion vectors (= camera motion, which is approximately correct
-                // since outlines sit on the surface they outline).
-                long mainView = vkImageView(main.getColorTextureView());
-                if (mainView == 0L) {
-                    CausticaMod.LOGGER.warn("World overlay: main target has no Vulkan image view; skipping");
-                    return;
+                // Which image the overlay lands in decides how it presents AND how frame generation sees it.
+                //
+                // On the SDR present path the overlay goes straight into the main render target, i.e. into
+                // the frame DLSS-FG snapshots as its "hudless" resource (RtComposite.captureFgHudless, taken
+                // right after the GUI and before the combined UI overlay composites back) and interpolates as
+                // its backbuffer. The outline therefore rides the scene motion vectors (approximately camera
+                // motion, correct for something sitting on the surface it outlines) instead of the
+                // screen-fixed UI resource, which interpolates as a static 2D layer and jitters as the camera
+                // moves.
+                //
+                // An HDR frame never presents main — it presents the PQ hdrDisplayImage — so the overlay must
+                // instead be baked into that image, at this same pre-hand seam, where presentHdr's own hudless
+                // snapshot and UI composite then see it. That keeps the two modes structurally identical for
+                // frame generation: both carry the outline in the pre-UI scene image and in the presented
+                // backbuffer, so DLSSG reconstructs it from the same motion vectors in either mode.
+                boolean hdrScene = RtComposite.INSTANCE.isHdrPresentActive();
+                long targetView = 0L;
+                if (!hdrScene) {
+                    targetView = vkImageView(main.getColorTextureView());
+                    if (targetView == 0L) {
+                        CausticaMod.LOGGER.warn("World overlay: main target has no Vulkan image view; skipping");
+                        return;
+                    }
                 }
-                record(ctx, ready, mainView, main.width, main.height);
+                record(ctx, ready, targetView, hdrScene, main.width, main.height);
             }
         } catch (Throwable t) {
             failed = true;
@@ -135,7 +152,8 @@ public final class RtWorldOverlay {
         uiCompositeSet.bind(ctx, overlayImage.view);
     }
 
-    private void record(RtContext ctx, List<RtOverlayFeature> ready, long targetView, int width, int height) {
+    private void record(RtContext ctx, List<RtOverlayFeature> ready, long targetView, boolean hdrScene,
+                        int width, int height) {
         var encoder = (VulkanCommandEncoder) ((CommandEncoderAccessor) RenderSystem.getDevice().createCommandEncoder()).caustica$getBackend();
         VkCommandBuffer cmd = encoder.allocateAndBeginTransientCommandBuffer();
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -151,15 +169,24 @@ public final class RtWorldOverlay {
                 VulkanCommandEncoder.memoryBarrier(cmd, stack); // this feature's writes visible to the next / final composite
             }
 
-            try (RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "world overlay UI composite")) {
-                beginColorRendering(cmd, stack, targetView, width, height, false); // LOAD the transparent UI image
-                VK10.vkCmdBindPipeline(cmd, VK10.VK_PIPELINE_BIND_POINT_GRAPHICS, uiCompositePipeline.handle);
-                VK10.vkCmdBindDescriptorSets(cmd, VK10.VK_PIPELINE_BIND_POINT_GRAPHICS, uiCompositePipeline.layout, 0,
-                        stack.longs(uiCompositeSet.set), null);
-                VK10.vkCmdDraw(cmd, 3, 1, 0, 0);
-                endRendering(cmd);
+            if (hdrScene) {
+                // The combined overlay replaces the main-target composite for this frame; a false return
+                // means the HDR image was mid-resize, in which case there is no correct target to fall back to
+                // (main is not presented in HDR) and dropping the overlay for one frame is the only option.
+                if (!RtComposite.INSTANCE.compositeWorldOverlayIntoHdr(cmd, overlayView, width, height)) {
+                    CausticaMod.LOGGER.warn("World overlay: HDR scene image unavailable; skipping overlay composite");
+                }
+            } else {
+                try (RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "world overlay UI composite")) {
+                    beginColorRendering(cmd, stack, targetView, width, height, false); // LOAD the transparent UI image
+                    VK10.vkCmdBindPipeline(cmd, VK10.VK_PIPELINE_BIND_POINT_GRAPHICS, uiCompositePipeline.handle);
+                    VK10.vkCmdBindDescriptorSets(cmd, VK10.VK_PIPELINE_BIND_POINT_GRAPHICS, uiCompositePipeline.layout, 0,
+                            stack.longs(uiCompositeSet.set), null);
+                    VK10.vkCmdDraw(cmd, 3, 1, 0, 0);
+                    endRendering(cmd);
+                }
+                VulkanCommandEncoder.memoryBarrier(cmd, stack); // this composite's writes visible to whatever presents next
             }
-            VulkanCommandEncoder.memoryBarrier(cmd, stack); // this composite's writes visible to whatever presents next
         }
         if (VK10.vkEndCommandBuffer(cmd) != VK10.VK_SUCCESS) {
             throw new IllegalStateException("vkEndCommandBuffer(world overlay) failed");

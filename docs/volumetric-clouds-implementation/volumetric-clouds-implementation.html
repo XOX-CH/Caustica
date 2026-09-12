@@ -283,8 +283,8 @@
             <dd>1 份密度定义</dd>
           </div>
           <div>
-            <dt>质量档位</dt>
-            <dd>3 档，物理一致</dd>
+            <dt>质量调节</dt>
+            <dd>7 个独立参数，物理一致</dd>
           </div>
         </dl>
       </div>
@@ -404,8 +404,14 @@ flowchart TB
               <tr><th scope="row">cloudLook1</th><td><code>.y</code></td><td>壳顶 rebased Y</td><td><code>seaLevel + 8.0×100 − terrain.blockY</code></td></tr>
               <tr><th scope="row">cloudLook1</th><td><code>.z</code></td><td>密度倍率</td><td><code>DENSITY</code></td></tr>
               <tr><th scope="row">cloudLook1</th><td><code>.w</code></td><td>启用开关 0 / 1</td><td><code>ENABLED</code></td></tr>
-              <tr><th scope="row">cloudLook2</th><td><code>.x</code></td><td>质量档 0 / 1 / 2</td><td><code>QUALITY</code></td></tr>
-              <tr><th scope="row">cloudLook2</th><td><code>.yzw</code></td><td>保留</td><td>0</td></tr>
+              <tr><th scope="row">cloudLook2</th><td><code>.x</code></td><td>形状 fBm 倍频程</td><td><code>SHAPE_OCTAVES</code></td></tr>
+              <tr><th scope="row">cloudLook2</th><td><code>.y</code></td><td>侵蚀邻域 0 / 1 / 2</td><td><code>EROSION</code></td></tr>
+              <tr><th scope="row">cloudLook2</th><td><code>.z</code></td><td>事件阴影精度 0 / 1 / 2</td><td><code>EVENT_SHADOW</code></td></tr>
+              <tr><th scope="row">cloudLook2</th><td><code>.w</code></td><td>保留</td><td>0</td></tr>
+              <tr><th scope="row">cloudLook3</th><td><code>.x</code></td><td>主路径步数上限</td><td><code>PATH_STEPS</code></td></tr>
+              <tr><th scope="row">cloudLook3</th><td><code>.y</code></td><td>阴影步数上限</td><td><code>SHADOW_STEPS</code></td></tr>
+              <tr><th scope="row">cloudLook3</th><td><code>.z</code></td><td>阴影步长比例</td><td><code>STRIDE_SCALE</code></td></tr>
+              <tr><th scope="row">cloudLook3</th><td><code>.w</code></td><td>透射率早退阈值</td><td><code>EXIT_FLOOR</code></td></tr>
             </tbody>
           </table>
         </div>
@@ -505,7 +511,7 @@ flowchart LR
           <p><strong>用 fBm 做侵蚀。</strong>fBm 侵蚀会得到絮状、丝状的边缘；Worley 的等值面是球面，天然产生圆鼓鼓的碎块，正是积云边缘被啃蚀的样子。</p>
         </div>
 
-        <p>Worley 有两个版本，差别只在邻域规模。<code>worley3()</code> 搜索 <code>3×3×3 = 27</code> 个邻格，正确性最高；<code>worley3Cheap()</code> 把格点平移半格后只查 <code>2×2×2 = 8</code> 个，省掉三分之二的哈希。之所以敢省：如果最近特征点恰好落在被跳过的角落里，场会读起来更平滑——而侵蚀只会做减法，不会凭空加密度，所以这个误差是可以容忍的。旗舰档用 27 邻域，均衡档用 8 邻域，性能档干脆不做侵蚀。</p>
+        <p>Worley 有两个版本，差别只在邻域规模。<code>worley3()</code> 搜索 <code>3×3×3 = 27</code> 个邻格，正确性最高；<code>worley3Cheap()</code> 把格点平移半格后只查 <code>2×2×2 = 8</code> 个，省掉三分之二的哈希。之所以敢省：如果最近特征点恰好落在被跳过的角落里，场会读起来更平滑——而侵蚀只会做减法，不会凭空加密度，所以这个误差是可以容忍的。侵蚀参数 2 用 27 邻域，1 用 8 邻域，0 干脆不做侵蚀。</p>
 
         <p><code>fbm3()</code> 每层频率乘 2.03 而不是 2.0，并加一个固定偏移。这两个细节都是为了去相关：整数倍的频率会让各层的格点对齐，叠加出可见的规则网格；2.03 与常量偏移把格点错开。</p>
 
@@ -670,7 +676,7 @@ flowchart TD
   G -->|否| H["在 q 求 σt 与 σc"]:::primary
   H --> I{"ξ 小于 σt / σ̄ ？"}:::neutral
   I -->|空碰撞| J["T ← T × (1 − σt/σ̄)"]:::neutral
-  J --> K{"T 低于档位阈值？"}:::neutral
+  J --> K{"T 低于早退阈值？"}:::neutral
   K -->|是| P
   K -->|否| B
   I -->|真实散射| L["权重 × 反照率<br/>NEE + 首事件 MS LUT"]:::primary
@@ -706,7 +712,7 @@ if (rndf(seed) &lt; sigma / sigmaBar) {
           <p>「抽样点落在出口之外」时<strong>不能</strong>再乘一个 <code>exp(−σ̄ · 剩余距离)</code>。直觉上似乎该补上「整段剩余距离都被穿过了」的衰减，但那是错的：这个随机抽样的位置本身已经编码了距离信息——抽到出口之外意味着这段距离上没有碰撞，比率乘积 <code>Π(1 − σt/σ̄)</code> 就是透射率的无偏估计。再乘一个指数因子等于把同一段距离计入两次，结果系统性偏暗。</p>
         </div>
 
-        <p>空碰撞分支里还有两个细节。第一，阈值判断只读 <code>transmittance.r</code>：这条路径上的透射率是标量量级（循环结束时会以 <code>.xxx</code> 广播回三个通道），取任一分量等价。第二，<code>exitFloor</code> 是档位相关的提前退出（0.05 / 0.02 / 0.005）：透射率一旦低于阈值，剩余的步数最多只能把它再压低一个不可分辨的比例，路径的后续 in-scatter 同样可以忽略，继续走完是纯粹的浪费。作者在注释里承认这是一个有偏的截断——它让极厚的云心略微偏「透明」，但换来的性能是值得的。</p>
+        <p>空碰撞分支里还有两个细节。第一，阈值判断只读 <code>transmittance.r</code>：这条路径上的透射率是标量量级（循环结束时会以 <code>.xxx</code> 广播回三个通道），取任一分量等价。第二，<code>exitFloor</code> 是逐帧推入的早退阈值（默认 0.020）：透射率一旦低于阈值，剩余的步数最多只能把它再压低一个不可分辨的比例，路径的后续 in-scatter 同样可以忽略，继续走完是纯粹的浪费。作者在注释里承认这是一个有偏的截断——它让极厚的云心略微偏「透明」，但换来的性能是值得的。</p>
 
         <h3>俄罗斯轮盘</h3>
 
@@ -772,7 +778,7 @@ dt *= 0.75 + 0.5 * rndf(seed);</code></pre>
           <p><strong>直接解析求解。</strong>密度场没有解析原函数，无法积分。</p>
         </div>
 
-        <p>走出循环之后还有一次截断：<code>transmittance &lt; 0.001</code> 时直接归零。厚云核心若泄漏千分之一量级的天空亮度，视觉上是「云在漏光」，比直接判黑更糟。配合循环内的档位阈值（0.05 / 0.02 / 0.005）提前退出，阴影行的成本在厚云处是随光学深度增长的，而不是随几何距离增长。</p>
+        <p>走出循环之后还有一次截断：<code>transmittance &lt; 0.001</code> 时直接归零。厚云核心若泄漏千分之一量级的天空亮度，视觉上是「云在漏光」，比直接判黑更糟。配合循环内的早退阈值提前退出，阴影行的成本在厚云处是随光学深度增长的，而不是随几何距离增长。</p>
 
         <p>最后，这条阴影透射率被乘进所有四条 shadow ray 调用点的结果里，位置在 <code>trace.slang</code> 的 <code>visibility()</code>：</p>
 
@@ -824,7 +830,7 @@ return luminance * CLOUD_MS_STRENGTH;</code></pre>
 
         <p>代价是这个近似并不完美：真实反弹被 <code>maxBounces</code> 与轮盘限制在半路，而 LUT 只在入口补过一次，云深处的能量会略偏低。这是刻意接受的折中，作者在注释里把它标注为有限反弹加 LUT 兜底的方案。</p>
 
-        <h3>天顶环境光与档位近似</h3>
+        <h3>天顶环境光与事件阴影近似</h3>
 
         <p class="code-lead">cloud.slang — 云点处的天顶环境光</p>
         <pre><code>float altitudeKm = worldPush.cloudLook0.w + (p.y - bottom) / 100.0;
@@ -836,7 +842,7 @@ return skyViewLut.SampleLevel(sunUv, 0.0).rgb + skyViewLut.SampleLevel(moonUv, 0
 
         <p>环境光向天顶方向查天空视图 LUT，把太阳与月亮两个切片相加。这里的 <code>radiusKm</code> 很关键：天空视图 LUT 是按观察者所在半径参数化的，云顶的云和云底的云看到的天光截然不同——越高的云，天顶方向上的大气越薄，环境光越接近太空的暗。所以每个云点都要按自己的绝对高度换算成半径再查表。这也解释了 <code>cloudLook0.w</code>（壳底绝对高度）为什么必须由 Java 侧推上来：shader 只拿到重基后的 Y，没有这个补偿量就算不出绝对方位的高度。</p>
 
-        <p>事件阴影在旗舰档每条射线都跑完整求积，均衡档只在首事件跑、后续事件用局部光学深度做 Beer 近似 <code>exp(−tau × 0.35)</code>，性能档全部用近似。<code>tau</code> 是「局部密度 × 沿光方向到云顶的斜距」，是一个不含随机数的列估计：它不足以取代精确自阴影，但足以让 LUT 的查找落在一个合理的区间。经验系数 0.35 让稠密内部的近似值接近精确走查的结果，而 LUT 的环境通道本来就承担了高阶填充，所以这个近似只影响直接光瓣的外观。这是一个典型的「档位换成本」设计：物理模型不变，只换估计精度。</p>
+        <p>事件阴影的频次由「事件阴影精度」参数决定：取 2 时每条射线都跑完整求积，取 1 时只在首事件跑、后续事件用局部光学深度做 Beer 近似 <code>exp(−tau × 0.35)</code>，取 0 时全部用近似。<code>tau</code> 是「局部密度 × 沿光方向到云顶的斜距」，是一个不含随机数的列估计：它不足以取代精确自阴影，但足以让 LUT 的查找落在一个合理的区间。经验系数 0.35 让稠密内部的近似值接近精确走查的结果，而 LUT 的环境通道本来就承担了高阶填充，所以这个近似只影响直接光瓣的外观。这是一个典型的「用估计精度换成本」的设计：物理模型不变，只换估计精度。</p>
       </section>
 
       <!-- ================= 07 ================= -->
@@ -1088,7 +1094,13 @@ float cloudTime = (float) (System.nanoTime() / 1.0e9 % 3600.0);</code></pre>
             </thead>
             <tbody>
               <tr><th scope="row"><code>cloud.enabled</code></th><td>true</td><td>—</td><td>总开关，关闭后壳层求交立即返回</td></tr>
-              <tr><th scope="row"><code>cloud.quality</code></th><td>1</td><td>0 – 2</td><td>质量档（见第 10 章）</td></tr>
+              <tr><th scope="row"><code>cloud.shape-octaves</code></th><td>3</td><td>1 – 6</td><td>形状噪声 fBm 倍频程数（见第 10 章）</td></tr>
+              <tr><th scope="row"><code>cloud.erosion</code></th><td>1</td><td>0 – 2</td><td>侵蚀邻域：0 不做 / 1 八邻域 / 2 二十七邻域</td></tr>
+              <tr><th scope="row"><code>cloud.path-steps</code></th><td>24</td><td>4 – 64</td><td>主路径自由飞行步数上限</td></tr>
+              <tr><th scope="row"><code>cloud.shadow-steps</code></th><td>12</td><td>1 – 48</td><td>阴影透射率等距步数</td></tr>
+              <tr><th scope="row"><code>cloud.stride-scale</code></th><td>0.40</td><td>0.10 – 1.00</td><td>阴影步长占剩余区间的比例</td></tr>
+              <tr><th scope="row"><code>cloud.exit-floor</code></th><td>0.020</td><td>0.001 – 0.200</td><td>透射率早退阈值</td></tr>
+              <tr><th scope="row"><code>cloud.event-shadow</code></th><td>1</td><td>0 – 2</td><td>事件阴影精度：0 全近似 / 1 首事件精确 / 2 全部精确</td></tr>
               <tr><th scope="row"><code>cloud.coverage</code></th><td>0.42</td><td>0.0 – 1.0</td><td>coverage 偏置，与降雨叠加</td></tr>
               <tr><th scope="row"><code>cloud.density</code></th><td>1.0</td><td>0.1 – 2.0</td><td>峰值消光倍率（乘以 0.35 /block）</td></tr>
               <tr><th scope="row"><code>cloud.wind-speed</code></th><td>6.0</td><td>0.0 – 30.0</td><td>信风速度，格/秒</td></tr>
@@ -1128,33 +1140,35 @@ float cloudTime = (float) (System.nanoTime() / 1.0e9 % 3600.0);</code></pre>
 
       <!-- ================= 10 ================= -->
       <section id="s10">
-        <h2><span class="num">10</span>质量分档与实测代价</h2>
+        <h2><span class="num">10</span>逐参数质量旋钮与实测代价</h2>
 
-        <p class="lede">三档质量共用同一套物理，只改变采样密度。这个约束让档位可以在运行时切换而不会出现「换了档云就变色」。</p>
+        <p class="lede">云的质量不再有预设档位，七个参数各自一个数值，任意组合都合法。它们按「误差能否被时间累积消掉」分成两类：改变密度场的<strong>形状参数</strong>，和只改变估计量方差的<strong>估计器参数</strong>。</p>
+
+        <p>形状参数（倍频程、侵蚀邻域）改变的是密度场本身——云的轮廓、碎边、丝状底部——它属于收敛后的图像，降噪器积累多少帧都重建不出来，所以这里的开销是唯一能留到最终画面的。估计器参数（步数上限、步长比例、早退阈值、事件阴影精度）只改变估计量方差与厚核截断，误差以逐帧噪声的形式出现，正是时间累积擅长消除的部分。两类参数可以独立取舍：把预算压在形状参数上、估计器保持中等，就得到接近顶配的观感而只付出中等开销。</p>
 
         <div class="table-wrap">
           <table>
-            <caption>表 7　三档质量下各轴的取值</caption>
+            <caption>表 7　七个参数、默认值与代价边界</caption>
             <thead>
-              <tr><th scope="col">轴</th><th scope="col">性能 · 0</th><th scope="col">均衡 · 1（默认）</th><th scope="col">旗舰 · 2</th></tr>
+              <tr><th scope="col">参数</th><th scope="col">默认</th><th scope="col">范围</th><th scope="col">代价与影响</th></tr>
             </thead>
             <tbody>
-              <tr><th scope="row">形状 fBm 倍频程</th><td>2</td><td>3</td><td>3</td></tr>
-              <tr><th scope="row">侵蚀</th><td>不做</td><td><code>worley3Cheap</code>（8 邻域）</td><td><code>worley3</code>（27 邻域）</td></tr>
-              <tr><th scope="row">主路径步数上限</th><td>16</td><td>24</td><td>40</td></tr>
-              <tr><th scope="row">阴影步数上限</th><td>8</td><td>12</td><td>24</td></tr>
-              <tr><th scope="row">阴影步长</th><td>剩余 × 0.50，夹 16–96</td><td>剩余 × 0.40，夹 12–64</td><td>剩余 × 0.34，夹 6–48</td></tr>
-              <tr><th scope="row">透射率早退阈值</th><td>0.05</td><td>0.02</td><td>0.005</td></tr>
-              <tr><th scope="row">事件阴影</th><td>全部 Beer 近似</td><td>首事件精确</td><td>全部精确</td></tr>
+              <tr><th scope="row">形状：<code>octaves</code></th><td>3</td><td>1 – 6</td><td>开销随层数线性增长；最细一层是近距离看到的细节</td></tr>
+              <tr><th scope="row">形状：<code>erosion</code></th><td>1</td><td>0 – 2</td><td>27 邻域每次求值 27 次哈希，是单价最高的开关；8 邻域省三分之二</td></tr>
+              <tr><th scope="row">估计器：<code>path-steps</code></th><td>24</td><td>4 – 64</td><td>自由程是指数分布，只在极厚云核里才会碰到上限</td></tr>
+              <tr><th scope="row">估计器：<code>shadow-steps</code></th><td>12</td><td>1 – 48</td><td>等距步数；步数越多噪声越低</td></tr>
+              <tr><th scope="row">估计器：<code>stride-scale</code></th><td>0.40</td><td>0.10 – 1.00</td><td>步长与其夹取窗口随比例一起缩放：下限为比例 × 30，0.40 即 12 格</td></tr>
+              <tr><th scope="row">估计器：<code>exit-floor</code></th><td>0.020</td><td>0.001 – 0.200</td><td>调高更省，代价是极厚云核略微偏透明</td></tr>
+              <tr><th scope="row">估计器：<code>event-shadow</code></th><td>1</td><td>0 – 2</td><td>2 表示每次事件都走完整阴影行走，是单项最贵的配置</td></tr>
             </tbody>
           </table>
         </div>
 
         <p>注意「主路径步数」这一行的含义与阴影不同：主路径用的是指数分布自由程，没有固定步长，这个上限只约束单次段积分里最多抽样多少次，用来兜住极端光学厚的情况；正常路径通常在撞到上限之前就被俄罗斯轮盘或透射率阈值结束了。阴影行则真的有步长，因为那里是固定步数的求积。</p>
 
-        <p>跨档位保持不变的是全部<strong>物理与估计器</strong>：相位函数与其采样、加权 delta tracking 的估计量、残差比率追踪的控制分量拆法、MS LUT 的内容、以及天气图、列上界网格、MS LUT 的烘焙结果。改变的只有每帧付出的求值次数与步数。于是档位切换是多帧收敛过程里的一个参数变化，不会引入几何或颜色上的突变。</p>
+        <p>七个参数都只改评估成本，保持不变的是全部<strong>物理与估计器</strong>：相位函数与其采样、加权 delta tracking 的估计量、残差比率追踪的控制分量拆法、MS LUT 的内容、以及天气图、列上界网格、MS LUT 的烘焙结果。于是任意组合都是多帧收敛过程里的一个参数变化，不会引入几何或颜色上的突变。</p>
 
-        <p>实测数据也给档位设计提供了依据：旗舰档在重云量场景下把帧率从关闭云时的 198 FPS 拉到 74 FPS，也就是云占了约 8.5 ms/帧，而预算是约 3 ms，超出约 2.5 倍。均衡档的目标是把阴影步进减半、并把侵蚀换成 8 邻域版本，落到旗舰档约三分之一的开销。此外还有两个零画质损失的提前退出承担了大头：透射率阈值截断，以及 <code>visibility()</code> 里「TLAS 已经全遮挡就跳过整段云步进」——后者在森林和洞穴场景里省掉的是最贵的一段。</p>
+        <p>实测数据给默认值提供了依据：七个参数的出厂值正是此前调优过的「均衡」组合（倍频程 3、8 邻域侵蚀、主路径 24 步、阴影 12 步、步长比例 0.40、早退 0.020、事件阴影 1），因此拆分前后的默认画面一致；此前的「旗舰」组合则对应倍频程 3、27 邻域侵蚀、主路径 40 步、阴影 24 步、步长比例 0.34、早退 0.005、事件阴影 2，它在重云量场景下把帧率从关闭云时的 198 FPS 拉到 74 FPS，也就是云占了约 8.5 ms/帧，而预算是约 3 ms，超出约 2.5 倍。其中最贵的单项是「每次事件都做精确阴影」：<code>CLOUD_MAX_BOUNCES</code> 为 6，一条路径最多触发 6 次完整的透射率行走，而事件阴影精度取 1 时只在首次事件做，相差约 12 倍的工作量。另有两个零画质损失的提前退出承担了大头：透射率阈值截断，以及 <code>visibility()</code> 里「TLAS 已经全遮挡就跳过整段云步进」——后者在森林和洞穴场景里省掉的是最贵的一段。</p>
 
         <p>尚未落地的部分同样明确，它们不是实现遗漏，而是有意分阶段：把太阳 NEE 的可见性做成可复用的 reservoir（Volumetric ReSTIR 那条路线<sup><a href="#cite-11">[11]</a></sup>）、把控制分量拆解用到自由飞行上、为密度场与 LUT 建数值回归测试、以及接入 NRD 作为 DLSS-RR 之外的降噪回退。</p>
       </section>

@@ -43,7 +43,13 @@ public final class RtRayTracingOptions {
             entities(),
             particles(),
             cloudEnabled(),
-            cloudQuality(),
+            cloudShapeOctaves(),
+            cloudErosion(),
+            cloudPathSteps(),
+            cloudShadowSteps(),
+            cloudStrideScale(),
+            cloudExitFloor(),
+            cloudEventShadow(),
             cloudCoverage(),
             cloudDensity(),
             cloudWindSpeed(),
@@ -58,19 +64,80 @@ public final class RtRayTracingOptions {
         return boolResetable("caustica.options.rt.cloud", CausticaConfig.Rt.Cloud.ENABLED);
     }
 
-    private static ResetableOption cloudQuality() {
-        IntSetting setting = CausticaConfig.Rt.Cloud.QUALITY;
+    /** Three-level option bound to an int setting; label keys are {@code captionKey.0} .. {@code .2}. */
+    private static ResetableOption threeLevelOption(String captionKey, IntSetting setting) {
         int factoryDefault = Math.clamp(setting.defaultValue(), 0, 2);
         OptionInstance<Integer> option = new OptionInstance<>(
-            "caustica.options.rt.cloudQuality",
-            OptionInstance.cachedConstantTooltip(Component.translatable("caustica.options.rt.cloudQuality.tooltip")),
-            (caption, tier) -> Options.genericValueLabel(caption,
-                    Component.translatable("caustica.options.rt.cloudQuality." + tier)),
+            captionKey,
+            OptionInstance.cachedConstantTooltip(Component.translatable(captionKey + ".tooltip")),
+            (caption, level) -> Options.genericValueLabel(caption,
+                    Component.translatable(captionKey + "." + level)),
             new OptionInstance.IntRange(0, 2),
             factoryDefault,
             setting::set);
         option.set(Math.clamp(setting.value(), 0, 2));
         return new ResetableOption(option, factoryDefault);
+    }
+
+    /** Integer slider bound directly to an int setting, labelled with the raw count. */
+    private static ResetableOption intSlider(String captionKey, IntSetting setting, int min, int max, int fallback) {
+        int factoryDefault = Math.clamp(setting.defaultValue(), min, max);
+        OptionInstance<Integer> option = new OptionInstance<>(
+            captionKey,
+            OptionInstance.cachedConstantTooltip(Component.translatable(captionKey + ".tooltip")),
+            (caption, value) -> Options.genericValueLabel(caption, Component.literal(Integer.toString(value))),
+            new OptionInstance.IntRange(min, max),
+            fallback,
+            setting::set);
+        option.set(Math.clamp(setting.value(), min, max));
+        return new ResetableOption(option, factoryDefault);
+    }
+
+    /** Slider with three decimal places (value × 1000). */
+    private static ResetableOption thousandthsSlider(String captionKey, dev.comfyfluffy.caustica.CausticaConfig.FloatSetting setting,
+                                                     int thousandthsMin, int thousandthsMax, int thousandthsDefault) {
+        OptionInstance<Integer> option = new OptionInstance<>(
+                captionKey,
+                OptionInstance.cachedConstantTooltip(Component.translatable(captionKey + ".tooltip")),
+                (caption, thousandths) -> Options.genericValueLabel(caption,
+                        Component.literal(String.format(Locale.ROOT, "%.3f", thousandths / 1000.0f))),
+                new OptionInstance.IntRange(thousandthsMin, thousandthsMax),
+                thousandthsDefault,
+                thousandths -> setting.set(thousandths / 1000.0f));
+        option.set(Math.clamp(Math.round(setting.value() * 1000.0f), thousandthsMin, thousandthsMax));
+        return new ResetableOption(option, thousandthsDefault);
+    }
+
+    // One control per pushed cloud parameter. The shape knobs change the converged image and the
+    // estimator knobs only its noise, so they are deliberately kept separate rather than bundled
+    // into presets.
+
+    private static ResetableOption cloudShapeOctaves() {
+        return intSlider("caustica.options.rt.cloudShapeOctaves", CausticaConfig.Rt.Cloud.SHAPE_OCTAVES, 1, 6, 3);
+    }
+
+    private static ResetableOption cloudErosion() {
+        return threeLevelOption("caustica.options.rt.cloudErosion", CausticaConfig.Rt.Cloud.EROSION);
+    }
+
+    private static ResetableOption cloudPathSteps() {
+        return intSlider("caustica.options.rt.cloudPathSteps", CausticaConfig.Rt.Cloud.PATH_STEPS, 4, 64, 24);
+    }
+
+    private static ResetableOption cloudShadowSteps() {
+        return intSlider("caustica.options.rt.cloudShadowSteps", CausticaConfig.Rt.Cloud.SHADOW_STEPS, 1, 48, 12);
+    }
+
+    private static ResetableOption cloudStrideScale() {
+        return hundredthsSlider("caustica.options.rt.cloudStrideScale", CausticaConfig.Rt.Cloud.STRIDE_SCALE, 10, 100, 40);
+    }
+
+    private static ResetableOption cloudExitFloor() {
+        return thousandthsSlider("caustica.options.rt.cloudExitFloor", CausticaConfig.Rt.Cloud.EXIT_FLOOR, 1, 200, 20);
+    }
+
+    private static ResetableOption cloudEventShadow() {
+        return threeLevelOption("caustica.options.rt.cloudEventShadow", CausticaConfig.Rt.Cloud.EVENT_SHADOW);
     }
 
     private static ResetableOption cloudCoverage() {

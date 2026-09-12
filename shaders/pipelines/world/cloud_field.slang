@@ -49,10 +49,6 @@ public static const float CLOUD_EROSION_STRENGTH = 0.42;
 public static const float CLOUD_MS_STRENGTH = 1.0;
 // In-medium scattering bounces per encounter; higher orders leak into the MS LUT.
 public static const int CLOUD_MAX_BOUNCES = 6;
-// Delta-tracking steps per traversal. Empty columns cost one macrogrid fetch each; these caps
-// only bite inside optically thick cores, where the albedo roulette usually wins first.
-public static const int CLOUD_MAX_STEPS = 40;
-public static const int CLOUD_MAX_SHADOW_STEPS = 24;
 
 // ---- Phase: HG + Draine approximate Mie (Jendersie & d'Eon 2023) ---------------------------------
 //

@@ -212,6 +212,12 @@ public final class RtComposite {
     // Step C.2: composites the combined UI overlay over hdrDisplayImage at paper white, just before present.
     private RtHdrCompositePipeline hdrCompositePipeline;
     private long hdrUiSampler;
+    // Composites the world overlay (block outline, glow outline, name tags) over hdrDisplayImage at paper
+    // white, at the pre-hand overlay seam. A SECOND instance of that pipeline, never the UI one above: a
+    // pipeline's descriptor set is a live object, and presentHdr rewrites the UI instance's bindings later
+    // in this same frame — before either dispatch has executed — so sharing one instance would make both
+    // dispatches read whichever image was written last.
+    private RtHdrCompositePipeline hdrWorldOverlayPipeline;
 
     private static final class PushSlot {
         final RtBuffer buffer;
@@ -1155,16 +1161,33 @@ public final class RtComposite {
             float cloudTopAltitudeKm = 8.0f;
             float cloudBaseRebased = (cloudSeaLevel + cloudBaseAltitudeKm * 100.0f) - terrain.blockY;
             float cloudTopRebased = (cloudSeaLevel + cloudTopAltitudeKm * 100.0f) - terrain.blockY;
-            float cloudTime = (float) (System.nanoTime() / 1.0e9 % 3600.0);
+            // Monotonic seconds since the renderer started: no hourly modulo wrap. The wind offset
+            // grows as windSpeed × time, so an unbounded clock keeps flowing freely instead of
+            // teleporting every cloud windSpeed × 3600 blocks on the hour (float precision at a
+            // month's runtime stays well under one block of drift).
+            float cloudTime = (float) (System.nanoTime() / 1.0e9);
             Float4 cloudLook0 = new Float4(cloudCoverage,
                     CausticaConfig.Rt.Cloud.WIND_SPEED.value(), cloudTime, cloudBaseAltitudeKm);
             Float4 cloudLook1 = new Float4(cloudBaseRebased, cloudTopRebased,
                     CausticaConfig.Rt.Cloud.DENSITY.value(),
                     CausticaConfig.Rt.Cloud.ENABLED.value() ? 1.0f : 0.0f);
-            // cloudLook2.x = quality tier (0 performance / 1 balanced / 2 flagship); the shader
-            // derives noise LOD, step caps and transmittance early-outs from it.
+            // cloudLook2 carries the shape knobs and the event-shadow mode, cloudLook3 the estimator
+            // budgets; the shader resolves every parameter independently.
             Float4 cloudLook2 = new Float4(
-                    (float) CausticaConfig.Rt.Cloud.QUALITY.value(), 0.0f, 0.0f, 0.0f);
+                    (float) CausticaConfig.Rt.Cloud.SHAPE_OCTAVES.value(),
+                    (float) CausticaConfig.Rt.Cloud.EROSION.value(),
+                    (float) CausticaConfig.Rt.Cloud.EVENT_SHADOW.value(), 0.0f);
+            Float4 cloudLook3 = new Float4(
+                    (float) CausticaConfig.Rt.Cloud.PATH_STEPS.value(),
+                    (float) CausticaConfig.Rt.Cloud.SHADOW_STEPS.value(),
+                    CausticaConfig.Rt.Cloud.STRIDE_SCALE.value(),
+                    CausticaConfig.Rt.Cloud.EXIT_FLOOR.value());
+
+            // World-stable cloud anchor: the terrain rebase origin (blockX, blockZ). Every ray origin
+            // is rebased by this value, so the shader re-adds it (cloudWorldXz) to keep the weather,
+            // macrogrid and shape/detail noise pinned to the world instead of drifting with each
+            // rebase. Matches WATER_ANCHOR_MASK's role for waves.
+            Float4 cloudOrigin = new Float4(terrain.blockX, terrain.blockZ, 0f, 0f);
             new WorldPushData(
                     frameInvViewProj,
                     new Float3((float) (camX - terrain.blockX), (float) (camY - terrain.blockY),
@@ -1185,6 +1208,8 @@ public final class RtComposite {
                     cloudLook0,
                     cloudLook1,
                     cloudLook2,
+                    cloudLook3,
+                    cloudOrigin,
                     sky.sunUv(),
                     sky.moonUv(),
                     waterParams,
@@ -1633,6 +1658,10 @@ public final class RtComposite {
             hdrCompositePipeline.destroy();
             hdrCompositePipeline = null;
         }
+        if (hdrWorldOverlayPipeline != null) {
+            hdrWorldOverlayPipeline.destroy();
+            hdrWorldOverlayPipeline = null;
+        }
         if (hdrUiSampler != 0L) {
             RtContext hdrCtx = RtContext.currentOrNull();
             if (hdrCtx != null) {
@@ -1754,6 +1783,51 @@ public final class RtComposite {
     }
 
     /**
+     * HDR counterpart of compositing the shared world-overlay buffer onto the SDR main target: blend
+     * {@code overlayView} (premultiplied, sRGB-authored — block outline, glow outline, name tags) over this
+     * frame's PQ-encoded HDR scene image ({@link #hdrDisplayImage}) in place, at paper white, using the same
+     * decode-blend-reencode maths {@link #presentHdr} applies to the combined UI overlay.
+     *
+     * <p>Running at the pre-hand overlay seam is what keeps frame generation identical in both modes: the
+     * outline is baked into the HDR image that {@code presentHdr} then snapshots as DLSSG's hudless resource
+     * and presents as the backbuffer — exactly the two SDR images that carry it ({@code main} and
+     * {@link #fgHudlessImage}). DLSSG therefore reproduces the outline from the scene motion vectors in
+     * either mode, instead of it riding the screen-fixed {@link RtUiOverlay} resource (which interpolates as
+     * a static 2D layer and jitters as the camera moves). The main target is deliberately left untouched:
+     * the HDR present path never shows it.
+     *
+     * <p>Returns false — the caller then visibly loses the outline for that frame — only when the HDR image
+     * is missing or still sized for a different frame (a resize race), never as a normal code path.
+     */
+    public boolean compositeWorldOverlayIntoHdr(VkCommandBuffer cmd, long overlayView, int width, int height) {
+        RtImage dst = hdrDisplayImage;
+        if (failed || dst == null || dst.width != width || dst.height != height || overlayView == 0L) {
+            return false;
+        }
+        RtContext ctx = RtContext.currentOrNull();
+        if (ctx == null || !ensureUiSampler(ctx)) {
+            return false;
+        }
+        if (hdrWorldOverlayPipeline == null) {
+            hdrWorldOverlayPipeline = RtHdrCompositePipeline.create(ctx);
+        }
+        hdrWorldOverlayPipeline.setImages(dst.view, overlayView, hdrUiSampler);
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            // The overlay's graphics writes (recorded earlier in this same command buffer) must land before
+            // the compute samples them; ALL_COMMANDS covers the display pass's earlier HDR-image writes too,
+            // since this dispatch reads and rewrites that image in place.
+            VkMemoryBarrier2.Buffer pre = VkMemoryBarrier2.calloc(1, stack).sType$Default();
+            pre.get(0).srcStageMask(65536L).srcAccessMask(65536L).dstStageMask(2048L).dstAccessMask(98304L);
+            VkDependencyInfo preDep = VkDependencyInfo.calloc(stack).sType$Default().pMemoryBarriers(pre);
+            KHRSynchronization2.vkCmdPipelineBarrier2KHR(cmd, preDep);
+            hdrWorldOverlayPipeline.dispatch(cmd, width, height, CausticaConfig.Rt.Hdr.uiNits(),
+                    "hdr world overlay composite");
+            VulkanCommandEncoder.memoryBarrier(cmd, stack); // this dispatch's write visible to presentHdr's reads
+        }
+        return true;
+    }
+
+    /**
      * Blit this frame's PQ-encoded HDR image straight into the swapchain image, replacing Minecraft's SDR
      * blit. Replicates {@code VulkanGpuSurface.blitFromTexture}'s barrier + acquire-wait/present-signal
      * sequence with the HDR {@link RtImage} as the (GENERAL-layout) source; an added memory barrier makes the
@@ -1790,7 +1864,8 @@ public final class RtComposite {
                     VkDependencyInfo preDep = VkDependencyInfo.calloc(stack).sType$Default().pMemoryBarriers(pre);
                     KHRSynchronization2.vkCmdPipelineBarrier2KHR(cmd, preDep);
                     hdrCompositePipeline.setImages(hdrDisplayImage.view, overlayView, hdrUiSampler);
-                    hdrCompositePipeline.dispatch(cmd, src.width, src.height, CausticaConfig.Rt.Hdr.uiNits());
+                    hdrCompositePipeline.dispatch(cmd, src.width, src.height, CausticaConfig.Rt.Hdr.uiNits(),
+                            "hdr ui composite");
                 }
                 RtUiOverlay.markConsumed();
             }
@@ -1991,6 +2066,11 @@ public final class RtComposite {
      */
     public void captureFgHudless(RenderTarget main) {
         if (!RtDlssFg.enabled() || !RtUiOverlay.enabled() || main == null || main.getColorTexture() == null) {
+            return;
+        }
+        if (isHdrPresentActive()) {
+            // HDR frames never present `main`, so this copy would be a full-frame copy of an image nothing
+            // consumes: the HDR path's hudless resource is fgHdrHudlessImage (see captureFgHdrHudless).
             return;
         }
         RtContext ctx = RtContext.currentOrNull();

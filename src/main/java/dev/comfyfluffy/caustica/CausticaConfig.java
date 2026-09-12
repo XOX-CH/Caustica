@@ -63,7 +63,9 @@ public final class CausticaConfig {
             Rt.Reflex.ENABLED, Rt.Bloom.STRENGTH, Rt.Exposure.MODE, Rt.Tonemap.GAMMA, Rt.Tonemap.HUE_SHIFT,
             Rt.Tonemap.SATURATION, Rt.Lighting.SUN_COLOR_TEMP, Rt.Lighting.NIGHT_BRIGHTNESS, Rt.FrameStats.ENABLED,
             Rt.Screenshots.EXR_ENABLED, Rt.Hdr.ENABLED, Ngx.PATH,
-            Rt.Cloud.ENABLED, Rt.Cloud.QUALITY, Rt.Cloud.COVERAGE, Rt.Cloud.DENSITY, Rt.Cloud.WIND_SPEED,
+            Rt.Cloud.ENABLED, Rt.Cloud.SHAPE_OCTAVES, Rt.Cloud.EROSION, Rt.Cloud.PATH_STEPS,
+            Rt.Cloud.SHADOW_STEPS, Rt.Cloud.STRIDE_SCALE, Rt.Cloud.EXIT_FLOOR, Rt.Cloud.EVENT_SHADOW,
+            Rt.Cloud.COVERAGE, Rt.Cloud.DENSITY, Rt.Cloud.WIND_SPEED,
             CausticaConfig.Rt.Water.WAVE_STRENGTH,
             CausticaConfig.Rt.Water.WAVE_HEIGHT,
             CausticaConfig.Rt.Water.WAVE_SPEED,
@@ -678,10 +680,41 @@ public final class CausticaConfig {
          */
         public static final class Cloud {
             public static final BooleanSetting ENABLED = bool("caustica.rt.cloud", "cloud.enabled", true);
-            // Quality tier: 0 = performance (no erosion, shortest marches), 1 = balanced (default),
-            // 2 = flagship (full 27-cell Worley erosion, longest marches, exact event shadows).
-            public static final IntSetting QUALITY =
-                    clampedInt("caustica.rt.cloud.quality", "cloud.quality", 1, 0, 2);
+            // Shape parameters. These change the density field itself — silhouettes, eroded edges,
+            // wispy bases — so their effect survives temporal accumulation and is the part of the
+            // budget that reaches the final frame.
+            //
+            // fBm octaves of the shape field. Cost grows linearly with this, and the finest octave
+            // is the one that reads as detail up close.
+            public static final IntSetting SHAPE_OCTAVES =
+                    clampedInt("caustica.rt.cloudShapeOctaves", "cloud.shape-octaves", 3, 1, 6);
+            // Erosion neighbourhood: 0 = none, 1 = 8-cell Worley (worley3Cheap), 2 = 27-cell Worley
+            // (worley3). The 27-cell search is the single most expensive term in a density
+            // evaluation, making this the largest per-sample cost knob.
+            public static final IntSetting EROSION =
+                    clampedInt("caustica.rt.cloudErosion", "cloud.erosion", 1, 0, 2);
+            // Estimator parameters. These change sampling variance and the thick-core truncation
+            // only, so their error arrives as per-frame noise the temporal denoiser integrates away.
+            //
+            // Free-flight step cap per segment. Only bites inside optically thick cores, where the
+            // albedo roulette or the transmittance floor usually ends the walk first.
+            public static final IntSetting PATH_STEPS =
+                    clampedInt("caustica.rt.cloudPathSteps", "cloud.path-steps", 24, 4, 64);
+            // Strides per shadow transmittance walk, and the stride length as a fraction of the
+            // remaining interval. The stride clamp window scales with the fraction, so that single
+            // number sets both the stride size and its bounds.
+            public static final IntSetting SHADOW_STEPS =
+                    clampedInt("caustica.rt.cloudShadowSteps", "cloud.shadow-steps", 12, 1, 48);
+            public static final FloatSetting STRIDE_SCALE =
+                    clampedFloat("caustica.rt.cloudStrideScale", "cloud.stride-scale", 0.4f, 0.1f, 1.0f);
+            // Running-product floor that ends a walk early. Higher is cheaper and lets very thick
+            // cores drift slightly transparent.
+            public static final FloatSetting EXIT_FLOOR =
+                    clampedFloat("caustica.rt.cloudExitFloor", "cloud.exit-floor", 0.02f, 0.001f, 0.2f);
+            // Event-shadow precision: 0 = Beer on the local tau everywhere, 1 = exact transmittance
+            // walk at each encounter's first event, 2 = exact everywhere.
+            public static final IntSetting EVENT_SHADOW =
+                    clampedInt("caustica.rt.cloudEventShadow", "cloud.event-shadow", 1, 0, 2);
             // Weather coverage baseline 0..1; Minecraft's rain level lifts it further (up to +0.35).
             public static final FloatSetting COVERAGE =
                     clampedFloat("caustica.rt.cloud.coverage", "cloud.coverage", 0.42f, 0.0f, 1.0f);

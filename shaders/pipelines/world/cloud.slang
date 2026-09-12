@@ -43,25 +43,69 @@ public float2 cloudWindOffset() {
     return cloudWindDirStatic() * max(worldPush.cloudLook0.y, 0.0) * worldPush.cloudLook0.z;
 }
 
-// ---- Quality tiers ------------------------------------------------------------------------------
+// ---- Per-parameter tuning -----------------------------------------------------------------------
+//
+// Every cloud knob is an individual number pushed each frame — there are no presets to keep
+// coherent, and any combination is valid. The parameters come in two kinds, and that distinction is
+// what makes them independently tunable:
+//
+//   shape     — octave count and erosion flavour. Changes the density field itself, therefore the
+//               converged image: silhouettes, eroded edges, wispy bases. No amount of temporal
+//               accumulation reconstructs it, so budget spent here is the only kind that survives
+//               into the final frame.
+//   estimator — step caps, stride scale, early-out floor and event-shadow precision. Changes
+//               estimator variance and the thick-core truncation only, so its error arrives as
+//               per-frame noise that the temporal denoiser integrates away.
+//
+// Physical transport (phase, tracking estimators, MS LUT) is never affected, and neither is any
+// bake, so every knob can move mid-session.
+public struct CloudTuning {
+    public int shapeOctaves;  // fBm octaves of the shape field
+    public int erosion;       // 0 = none, 1 = 8-cell Worley, 2 = 27-cell Worley
+    public int eventShadow;   // 0 = Beer everywhere, 1 = exact at the first event, 2 = exact everywhere
+    public int pathSteps;     // free-flight step cap per segment
+    public int shadowSteps;   // strides per transmittance walk
+    public float strideScale; // stride length as a fraction of the remaining interval
+    public float exitFloor;   // running-product floor that ends a walk early
+};
 
-/**
- * Quality tier from cloudLook2.x: 0 = performance, 1 = balanced (default), 2 = flagship.
- *
- * The tier is the single knob for everything the frame budget pays per cloud query: density-noise
- * LOD (shape octaves, erosion flavour), transmittance-stride counts, the free-flight step cap,
- * and whether each scattering event's shadow ray runs the full residual ratio tracking or a
- * tau-based Beer estimate. Physical transport (phase, tracking estimators, MS LUT) is identical
- * across tiers — only evaluation cost changes, so tiers can be switched mid-session safely and
- * the weather/macrogrid/MS-LUT bakes stay exactly the same.
- *
- * Measured pressure (RTX 40 class, 1 spp): flagship cost ~8.5 ms/frame at heavy coverage vs
- * ~3 ms budgeted; balanced targets ~1/3 of that by halving the shadow marches and dropping the
- * erosion to the 8-cell search; performance trades the last visual layer (erosion detail) for
- * another ~40%.
- */
-public int cloudQualityTier() {
-    return clamp(int(round(worldPush.cloudLook2.x)), 0, 2);
+public CloudTuning cloudTuning() {
+    CloudTuning t;
+    t.shapeOctaves = clamp(int(round(worldPush.cloudLook2.x)), 1, 8);
+    t.erosion = clamp(int(round(worldPush.cloudLook2.y)), 0, 2);
+    t.eventShadow = clamp(int(round(worldPush.cloudLook2.z)), 0, 2);
+    t.pathSteps = clamp(int(round(worldPush.cloudLook3.x)), 1, 512);
+    t.shadowSteps = clamp(int(round(worldPush.cloudLook3.y)), 1, 512);
+    t.strideScale = clamp(worldPush.cloudLook3.z, 0.0, 1.0);
+    t.exitFloor = clamp(worldPush.cloudLook3.w, 0.0, 1.0);
+    return t;
+}
+
+// Transmittance stride length for one step; the caller applies the per-stride jitter. Both clamp
+// bounds scale with the ratio so a single number stays physical across its whole range: 0.40
+// reproduces the 12–64 block window the tracker was tuned against.
+public float cloudShadowStride(float strideScale, float remaining) {
+    return clamp(remaining * strideScale, strideScale * 30.0, strideScale * 160.0);
+}
+
+// Whether this scattering event runs the exact transmittance walk rather than the tau-based Beer
+// estimate. Mode 1 keeps each encounter's first event exact and estimates the deeper ones; the MS
+// LUT's ambient term already carries the higher-order fill those events contribute.
+public bool cloudExactShadow(int eventShadow, bool firstEvent) {
+    return eventShadow >= 2 || (eventShadow == 1 && firstEvent);
+}
+
+// ---- World anchor --------------------------------------------------------------------------------
+//
+// Every ray origin and terrain instance transform is rebased so the player sits near the float
+// origin, and the rebase origin (worldPush.cloudOrigin.xy = (blockX, blockZ)) moves each time the
+// terrain rebuilds. A rebased coordinate is therefore NOT world-stable: without compensation the
+// whole cloud field would shift with the origin. Reconstruct the world XZ here for every domain
+// that must stay pinned to the world — the weather texture, the macrogrid, the shape/detail noise
+// and the column crossing test. Only the horizontal axes are re-anchored; Y stays rebased relative
+// to the (equally rebased) pushed shell, which keeps the noise-domain magnitudes small and precise.
+public float2 cloudWorldXz(float3 p) {
+    return p.xz + worldPush.cloudOrigin.xy;
 }
 
 // ---- Density field ------------------------------------------------------------------------------
@@ -70,7 +114,7 @@ public int cloudQualityTier() {
 // and biased the field (weatherCoverageField in cloud_field), so the runtime lookup is a plain wrap.
 // R = coverage 0..1, G = cloud type 0..1 (0 = stratus .. 1 = cumulus).
 public float2 sampleWeather(float3 p) {
-    float2 uv = frac(p.xz / CLOUD_WEATHER_SPAN);
+    float2 uv = frac(cloudWorldXz(p) / CLOUD_WEATHER_SPAN);
     return cloudWeatherTex.SampleLevel(uv, 0.0).rg;
 }
 
@@ -79,7 +123,7 @@ public float2 sampleWeather(float3 p) {
 // bound is that constant and an empty column's is 0 — the macrogrid exists to tell them apart
 // one fetch at a time.
 public float columnMajorant(float3 p) {
-    float2 uv = frac(p.xz / CLOUD_WEATHER_SPAN);
+    float2 uv = frac(cloudWorldXz(p) / CLOUD_WEATHER_SPAN);
     float maxCoverage = cloudMacroGrid.SampleLevel(uv, 0.0).r;
     return maxCoverage > 0.003 ? CLOUD_MAX_SIGMA * max(worldPush.cloudLook1.z, 0.0) : 0.0;
 }
@@ -114,16 +158,15 @@ public bool cloudSigma(float3 p, out float sigmaT, out float sigmaControl) {
     // Shape: 3D fBm gated by coverage (Nubis' threshold remap), then eroded by Worley. Coverage
     // controls WHERE clouds exist; peak density inside a cloud is independent of coverage, which
     // is why the macrogrid majorant is the global CLOUD_MAX_SIGMA × scale for any covered column.
-    // Noise LOD rides the quality tier: the erosion pass alone is 24–81 hashes — the single
-    // largest per-eval cost in the tracker — so the lower tiers trade it first.
-    int q = cloudQualityTier();
-    float3 sp = p * CLOUD_SHAPE_FREQ;
+    CloudTuning tune = cloudTuning();
+    float3 sp = float3(cloudWorldXz(p) * CLOUD_SHAPE_FREQ, p.y * CLOUD_SHAPE_FREQ);
     float2 wo = cloudWindOffset();
-    float shape = fbm3(sp + float3(wo.x, 0.0, wo.y) * CLOUD_SHAPE_FREQ, q >= 1 ? 3 : 2);
+    float shape = fbm3(sp + float3(wo.x, 0.0, wo.y) * CLOUD_SHAPE_FREQ, tune.shapeOctaves);
     float density = cloudRemap(shape * profile, 1.0 - coverage, 1.0, 0.0, 1.0);
-    if (density > 0.0 && q >= 1) {
-        float3 ep = p * CLOUD_EROSION_FREQ + float3(worldPush.cloudLook0.z * 0.01, 0.0, 0.0);
-        float erosion = q >= 2 ? worley3(ep) : worley3Cheap(ep);
+    if (density > 0.0 && tune.erosion >= 1) {
+        float2 eolXz = cloudWorldXz(p) * CLOUD_EROSION_FREQ;
+        float3 ep = float3(eolXz.x + worldPush.cloudLook0.z * 0.01, p.y * CLOUD_EROSION_FREQ, eolXz.y);
+        float erosion = tune.erosion >= 2 ? worley3(ep) : worley3Cheap(ep);
         density = cloudRemap(density, erosion * CLOUD_EROSION_STRENGTH * (1.0 - density), 1.0, 0.0, 1.0);
     }
     sigmaT = density * scale;
@@ -137,7 +180,7 @@ public bool cloudSigma(float3 p, out float sigmaT, out float sigmaControl) {
 // whole remaining interval). Both the macrogrid and the weather field are indexed in world XZ —
 // the bake advects internally, so the runtime needs no offset here.
 float nextColumnDistance(float3 p, float3 rd, float tMax) {
-    float2 rel = p.xz / CLOUD_MACRO_CELL;
+    float2 rel = cloudWorldXz(p) / CLOUD_MACRO_CELL;
     float2 d = rd.xz / CLOUD_MACRO_CELL;
     float best = tMax;
     for (int axis = 0; axis < 2; axis++) {
@@ -198,20 +241,20 @@ public bool cloudShellInterval(float3 ro, float3 rd, float tMax, out float tEnte
  * carry a blue-noise-ish jitter so DLSS-RR integrates the quadrature error away over frames.
  * Empty columns cost one macrogrid fetch (plus cell-boundary hops) and return 1.
  *
- * Tiered cost: the stride count, stride scale and early-exit threshold all follow the quality
- * tier. The early exit is the classic production transmittance cut — once the running product
- * drops below the threshold the remaining strides could only darken it further by that fraction,
- * so walking them buys nothing visible; products below 0.001 clamp to 0 so thick cores stay
- * opaque instead of leaking a few percent of sky.
+ * Cost rides the estimator knobs: stride count, stride fraction and the early-exit floor are each
+ * pushed individually. The early exit is the classic production transmittance cut — once the
+ * running product drops below the threshold the remaining strides could only darken it further by
+ * that fraction, so walking them buys nothing visible; products below 0.001 clamp to 0 so thick
+ * cores stay opaque instead of leaking a few percent of sky.
  */
 public float3 cloudTransmittance(float3 origin, float3 dir, float tMax, inout uint seed) {
     float tEnter, tExit;
     if (!cloudShellInterval(origin, dir, tMax, tEnter, tExit)) {
         return float3(1.0, 1.0, 1.0);
     }
-    int q = cloudQualityTier();
-    int maxSteps = q == 0 ? 8 : (q == 1 ? 12 : CLOUD_MAX_SHADOW_STEPS);
-    float exitFloor = q == 0 ? 0.05 : (q == 1 ? 0.02 : 0.005);
+    CloudTuning tune = cloudTuning();
+    int maxSteps = tune.shadowSteps;
+    float exitFloor = tune.exitFloor;
     float transmittance = 1.0;
     float t = tEnter;
     for (int i = 0; i < maxSteps && t < tExit; i++) {
@@ -227,12 +270,9 @@ public float3 cloudTransmittance(float3 origin, float3 dir, float tMax, inout ui
         }
         float remaining = tExit - t;
         // Jittered stride: the deterministic lattice would freeze a quadrature bias into every
-        // frame; the jitter turns it into noise DLSS-RR integrates out. Lower tiers take longer,
-        // fewer strides over the same interval.
-        float dt = q == 0 ? clamp(remaining * 0.5, 16.0, 96.0)
-                : q == 1 ? clamp(remaining * 0.4, 12.0, 64.0)
-                : clamp(remaining * 0.34, 6.0, 48.0);
-        dt *= 0.75 + 0.5 * rndf(seed);
+        // frame; the jitter turns it into noise DLSS-RR integrates out. A larger stride fraction
+        // takes fewer, longer strides over the same interval.
+        float dt = cloudShadowStride(tune.strideScale, remaining) * (0.75 + 0.5 * rndf(seed));
         float sigmaT, sigmaC;
         if (cloudSigma(p, sigmaT, sigmaC)) {
             float sigmaR = max(sigmaT - sigmaC, 0.0);
@@ -272,12 +312,12 @@ float3 cloudSkyAmbient(float3 p, SkyState sky) {
  * bounces carry part of orders ≥ 2 themselves; charging the LUT everywhere would double-count
  * that fraction — the documented Tier S trade, research doc §7.2 "有限反弹 + LUT 兜底").
  *
- * The event's shadow ray is the most expensive single term (a full residual-ratio-tracking walk).
- * Flagship runs it everywhere; balanced runs it at the encounter's first event and estimates
- * deeper events from the local tau; performance always estimates. The estimate is a Beer term on
- * the same tau the MS LUT lookup uses, scaled by an empirical half-slant factor so a dense
- * interior lands near the exact walk's answer; the LUT's ambient term already covers the
- * higher-order fill, so the estimate only steers the direct lobe.
+ * The event's shadow ray is the most expensive single term (a full residual-ratio-tracking walk),
+ * so the convergence axis decides how often it runs: at every event, only at each encounter's
+ * first event, or never. The estimate is a Beer term on the same tau the MS LUT lookup uses, scaled
+ * by an empirical half-slant factor so a dense interior lands near the exact walk's answer; the
+ * LUT's ambient term already covers the higher-order fill, so the estimate only steers the direct
+ * lobe.
  */
 public float3 cloudInscatter(float3 p, float3 rd, MieParams mie, SkyState sky,
                              bool firstEvent, inout uint seed) {
@@ -292,8 +332,7 @@ public float3 cloudInscatter(float3 p, float3 rd, MieParams mie, SkyState sky,
     float2 lutUv = float2(saturate(cosLight * 0.5 + 0.5), saturate(tau / 32.0));
     float4 ms = cloudMultiScatterLut.SampleLevel(lutUv, 0.0);
 
-    int q = cloudQualityTier();
-    bool exactShadow = q >= 2 || (q == 1 && firstEvent);
+    bool exactShadow = cloudExactShadow(cloudTuning().eventShadow, firstEvent);
     float3 shadowTerm = exactShadow
             ? cloudTransmittance(p + celestialLight.dir * 2.0, celestialLight.dir, 10000.0, seed)
             : exp(-tau * 0.35).xxx;
@@ -347,9 +386,9 @@ public CloudOutcome cloudIntegrate(float3 ro, float3 rd, float tMax, float tEnte
     MieParams mie = mieParams(CLOUD_DROPLET_UM);
     bool msPending = firstEvent;
     float t = tEnter;
-    int q = cloudQualityTier();
-    int maxSteps = q == 0 ? 16 : (q == 1 ? 24 : CLOUD_MAX_STEPS);
-    float exitFloor = q == 0 ? 0.05 : (q == 1 ? 0.02 : 0.005);
+    CloudTuning tune = cloudTuning();
+    int maxSteps = tune.pathSteps;
+    float exitFloor = tune.exitFloor;
 
     for (int step = 0; step < maxSteps; step++) {
         if (t >= tExit) {

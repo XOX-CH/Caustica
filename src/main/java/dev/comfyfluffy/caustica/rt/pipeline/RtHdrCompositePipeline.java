@@ -30,10 +30,12 @@ import static dev.comfyfluffy.caustica.rt.RtContext.check;
 import static dev.comfyfluffy.caustica.rt.pipeline.RtBindings.*;
 
 /**
- * Compute pass that composites the vanilla UI overlay (premultiplied sRGB rgba8, sampled) over the
- * PQ-encoded HDR display image in place (decode-blend-reencode, since PQ is nonlinear), at paper white. Used
- * by the HDR present path (step C.2) after the GUI has rendered into the overlay, before the HDR image is
- * blitted to the PQ swapchain.
+ * Compute pass that composites premultiplied, sRGB-authored RGBA8 overlay content over the PQ-encoded HDR
+ * display image in place (decode-blend-reencode, since PQ is nonlinear), at paper white. Two callers share
+ * it, each with its OWN instance (a pipeline's descriptor set is a live object, so one instance can only
+ * serve one image pair per frame): the HDR present path blends the combined vanilla UI overlay in at the
+ * end of the frame, and {@code RtComposite.compositeWorldOverlayIntoHdr} blends the world overlay (block
+ * outline, glow outline, name tags) in at the pre-hand overlay seam, before DLSS-FG's hudless snapshot.
  */
 public final class RtHdrCompositePipeline {
     private static final String SHADER_DIR = "/caustica/shaders/pipelines/hdr_composite/";
@@ -136,8 +138,8 @@ public final class RtHdrCompositePipeline {
         boundSampler = sampler;
     }
 
-    public void dispatch(VkCommandBuffer cmd, int width, int height, float uiNits) {
-        try (MemoryStack stack = MemoryStack.stackPush(); RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, "hdr ui composite")) {
+    public void dispatch(VkCommandBuffer cmd, int width, int height, float uiNits, String label) {
+        try (MemoryStack stack = MemoryStack.stackPush(); RtDebugLabels.Scope ignored = RtDebugLabels.scope(ctx, cmd, label)) {
             VK10.vkCmdBindPipeline(cmd, VK10.VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
             VK10.vkCmdBindDescriptorSets(cmd, VK10.VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, stack.longs(descriptorSet), null);
             ByteBuffer push = stack.malloc(PUSH_BYTES);
