@@ -272,7 +272,7 @@
       <div class="report-intro__content">
         <p class="report-intro__eyebrow">Caustica · 体积云实现研读</p>
         <h1>体积云是怎么写出来的：从零依赖云场到路径追踪传输</h1>
-        <p class="report-intro__summary">这套体积云没有网格、不进加速结构：云的形状由一段程序化天气场逐点求值，自由飞行用加权 delta tracking 完成，阴影用残差比率追踪，多重散射由一个静态蒙特卡洛 LUT 闭环。整份实现最核心的工程判断是让「密度定义只有一份」——路径积分、阴影射线与三张 LUT 的烘焙调用的是同一个 <code>cloudSigma()</code>，从设计上排除了三者互相矛盾的 bug。</p>
+        <p class="report-intro__summary">这套体积云没有网格、不进加速结构：云的形状由一段程序化天气场逐点求值，自由飞行用加权 delta tracking 完成，阴影用抖动步长的 Beer 求积，多重散射由一个静态蒙特卡洛 LUT 闭环。整份实现最核心的工程判断是让「密度定义只有一份」——路径积分、阴影射线与三张 LUT 的烘焙调用的是同一个 <code>cloudSigma()</code>，从设计上排除了三者互相矛盾的 bug。</p>
         <dl class="intro-facts">
           <div>
             <dt>阅读范围</dt>
@@ -496,7 +496,7 @@ flowchart LR
   B --> C["3D fBm 形状<br/>2 或 3 倍频程"]:::primary
   C --> D["coverage 门控重映射<br/>阈值 = 1 − coverage"]:::primary
   D --> E["Worley 侵蚀<br/>仅边缘，强度 ×（1−密度）"]:::neutral
-  E --> F["σt 与 σc<br/>逐点密度输出"]:::core
+  E --> F["σt<br/>逐点密度输出"]:::core
   classDef neutral fill:#FFFFFF,stroke:#D7DFEA,color:#10182B
   classDef primary fill:#EAF2FE,stroke:#0969DA,color:#0A3F7D
   classDef core fill:#EDF2F8,stroke:#5C6A80,color:#10182B
@@ -511,7 +511,7 @@ flowchart LR
           <p><strong>用 fBm 做侵蚀。</strong>fBm 侵蚀会得到絮状、丝状的边缘；Worley 的等值面是球面，天然产生圆鼓鼓的碎块，正是积云边缘被啃蚀的样子。</p>
         </div>
 
-        <p>Worley 有两个版本，差别只在邻域规模。<code>worley3()</code> 搜索 <code>3×3×3 = 27</code> 个邻格，正确性最高；<code>worley3Cheap()</code> 把格点平移半格后只查 <code>2×2×2 = 8</code> 个，省掉三分之二的哈希。之所以敢省：如果最近特征点恰好落在被跳过的角落里，场会读起来更平滑——而侵蚀只会做减法，不会凭空加密度，所以这个误差是可以容忍的。侵蚀参数 2 用 27 邻域，1 用 8 邻域，0 干脆不做侵蚀。</p>
+        <p>Worley 有两个版本，差别只在邻域规模。<code>worley3x27()</code> 搜索 <code>3×3×3 = 27</code> 个邻格，正确性最高；<code>worley3x8()</code> 把格点平移半格后只查 <code>2×2×2 = 8</code> 个，省掉三分之二的哈希。之所以敢省：如果最近特征点恰好落在被跳过的角落里，场会读起来更平滑——而侵蚀只会做减法，不会凭空加密度，所以这个误差是可以容忍的。侵蚀参数 2 用 27 邻域，1 用 8 邻域，0 干脆不做侵蚀。</p>
 
         <p><code>fbm3()</code> 每层频率乘 2.03 而不是 2.0，并加一个固定偏移。这两个细节都是为了去相关：整数倍的频率会让各层的格点对齐，叠加出可见的规则网格；2.03 与常量偏移把格点错开。</p>
 
@@ -534,10 +534,10 @@ return saturate(field * 1.35);</code></pre>
 
         <p class="code-lead">cloud_field.slang — 高度剖面</p>
         <pre><code>public float heightProfile(float hf, float type) {
-    float base = cloudRemap(hf, 0.0, 0.04 + 0.10 * type, 0.0, 1.0);
+    float base = cloudRemap(hf, 0.0, 0.04 + 0.10 * type);
     float topStart = lerp(0.28, 0.62, type);
     float topEnd   = lerp(0.42, 1.00, type);
-    float top = 1.0 - cloudRemap(hf, topStart, topEnd, 0.0, 1.0);
+    float top = 1.0 - cloudRemap(hf, topStart, topEnd);
     return base * top;
 }</code></pre>
 
@@ -545,23 +545,23 @@ return saturate(field * 1.35);</code></pre>
 
         <h3>密度合成与一个关键推论</h3>
 
-        <p><code>cloudSigma()</code> 是整套实现里最重要的一个函数：它同时输出总消光 <code>σt</code> 和控制分量 <code>σc</code>，并在三层上做了早退。</p>
+        <p><code>cloudSigma()</code> 是整套实现里最重要的一个函数：它返回总消光 <code>σt</code>，并在三层上做了早退。<strong>返回 0 就是「这里是真空」</strong>——调用方拿到一个数就能直接用，不必再额外判断一个布尔量。</p>
 
         <p class="code-lead">cloud.slang — 密度求值与早退</p>
         <pre><code>float bottom = worldPush.cloudLook1.x;
 float top    = worldPush.cloudLook1.y;
-if (p.y &lt; bottom || p.y &gt; top) { return false; }      // 壳层之外
+if (p.y &lt; bottom || p.y &gt; top) { return 0.0; }        // 壳层之外
 float2 weather = sampleWeather(p);
 float coverage = weather.r;
-if (coverage &lt;= 0.003) { return false; }              // 空列
+if (coverage &lt;= 0.003) { return 0.0; }                // 空列
 float profile = heightProfile(hf, type);
-if (profile &lt;= 0.003) { return false; }               // 该高度没有云</code></pre>
+if (profile &lt;= 0.003) { return 0.0; }                 // 该高度没有云</code></pre>
 
         <p>三处早退的顺序是按「判断成本 × 命中率」排的。阈值取 0.003 而不是与 0 严格比较：浮点重映射之后几乎不会精确落在 0，用一个极小的正阈值把「数值上等于零」的区域统一判成「确定没有云」，早退才真的生效。更重要的是，这个阈值与列上界网格的判据同源，保证「网格说这列没云」与「密度函数会早退」永远一致——否则追踪器可能停在一列里反复采到零密度。</p>
 
         <p>密度合成的关键是这一行重映射：</p>
 
-        <pre><code>float density = cloudRemap(shape * profile, 1.0 - coverage, 1.0, 0.0, 1.0);</code></pre>
+        <pre><code>float density = cloudRemap(shape * profile, 1.0 - coverage, 1.0);</code></pre>
 
         <p><code>shape × profile</code> 落在 [0, 1]，重映射的阈值是 <code>1 − coverage</code>。coverage 越大，阈值越低，越多体素被点亮；但一旦跨过阈值，斜率恒为 <code>1/coverage</code>，因此<strong>峰值密度仍然回到 1</strong>。这个代数事实带来一个非常重要的推论：coverage 只决定「云占多大体积比」，不决定「云有多厚」。</p>
 
@@ -572,16 +572,12 @@ if (profile &lt;= 0.003) { return false; }               // 该高度没有云</
 
         <p>侵蚀那一步也有一处刻意的设计：</p>
 
-        <pre><code>float erosion = q &gt;= 2 ? worley3(ep) : worley3Cheap(ep);
-density = cloudRemap(density, erosion * CLOUD_EROSION_STRENGTH * (1.0 - density), 1.0, 0.0, 1.0);</code></pre>
+        <pre><code>float erosion = tune.erosion &gt;= 2 ? worley3x27(ep) : worley3x8(ep);
+density = cloudRemap(density, erosion * CLOUD_EROSION_STRENGTH * (1.0 - density), 1.0);</code></pre>
 
         <p>侵蚀量被乘上 <code>(1 − density)</code>，于是密集的云心几乎不受影响，只有低密度的边缘被啃蚀。这是 Nubis 的「只侵蚀边缘」配方：如果均匀侵蚀，云心会被啃出空洞，看起来像奶酪而不是云。</p>
 
-        <p>最后是控制分量的定义：</p>
-
-        <pre><code>sigmaControl = coverage * profile * scale * 0.5;</code></pre>
-
-        <p>它刻意<strong>不含任何三维噪声</strong>，只有 coverage 与高度剖面这两个平缓因子。这个「平缓」是第 05 章残差比率追踪能成立的全部前提：把可以被解析处理的大块能量从随机估计里剥离出去，随机估计只需要面对高频残差，方差随之大幅下降。<code>×0.5</code> 是一个保守系数，保证 <code>σc ≤ σt</code> 在数值上始终成立——控制分量一旦超过真实密度，残差就会变成负数，估计器失效。</p>
+        <p>函数到这里就结束了：它返回 <code>density × scale</code>，也就是该点的 <code>σt</code>。整个密度域只有这一个出口，自由飞行、阴影求积、LUT 引导三条链路读的都是它，所以三者不可能对「哪里有云」产生分歧。</p>
       </section>
 
       <!-- ================= 03 ================= -->
@@ -598,8 +594,8 @@ density = cloudRemap(density, erosion * CLOUD_EROSION_STRENGTH * (1.0 - density)
         </div>
 
         <p class="code-lead">cloud.slang — 列上界查询</p>
-        <pre><code>public float columnMajorant(float3 p) {
-    float2 uv = frac(p.xz / CLOUD_WEATHER_SPAN);
+        <pre><code>public float cloudColumnMajorant(float3 p) {
+    float2 uv = cloudWeatherUv(p);
     float maxCoverage = cloudMacroGrid.SampleLevel(uv, 0.0).r;
     return maxCoverage &gt; 0.003 ? CLOUD_MAX_SIGMA * max(worldPush.cloudLook1.z, 0.0) : 0.0;
 }</code></pre>
@@ -626,7 +622,7 @@ macroGridImage[tid.xy] = maxCoverage;</code></pre>
 
         <h3>跨列跳跃</h3>
 
-        <p>知道了「这一列有没有云」，还需要知道「什么时候离开这一列」。<code>nextColumnDistance()</code> 是一个二维 DDA 步进：对 x、z 两个轴分别算出到下一个网格边界的参数距离，取较小者。</p>
+        <p>知道了「这一列有没有云」，还需要知道「什么时候离开这一列」。<code>cloudNextColumnDistance()</code> 是一个二维 DDA 步进：对 x、z 两个轴分别算出到下一个网格边界的参数距离，取较小者。</p>
 
         <p class="code-lead">cloud.slang — 到下一列的参数距离</p>
         <pre><code>float2 rel = p.xz / CLOUD_MACRO_CELL;
@@ -673,7 +669,7 @@ flowchart TD
   D -->|有云| F["s ← −ln(ξ) / σ̄<br/>抽样自由程"]:::primary
   F --> G{"t + s ≥ tExit ？"}:::neutral
   G -->|是| P
-  G -->|否| H["在 q 求 σt 与 σc"]:::primary
+  G -->|否| H["在 q 求 σt"]:::primary
   H --> I{"ξ 小于 σt / σ̄ ？"}:::neutral
   I -->|空碰撞| J["T ← T × (1 − σt/σ̄)"]:::neutral
   J --> K{"T 低于早退阈值？"}:::neutral
@@ -694,15 +690,14 @@ flowchart TD
         <pre><code>float s = -log(max(rndf(seed), 1.0e-7)) / sigmaBar;
 float tNew = t + s;
 if (tNew &gt;= tExit) {
-    break;   // 抽样越过了出口：比率追踪的乘积就此成立，不补尾部因子
+    break;   // 抽样越过了出口：加权 delta tracking 的乘积就此成立，不补尾部因子
 }
 float3 q = ro + rd * tNew;
-float sigmaT, sigmaC;
-float sigma = cloudSigma(q, sigmaT, sigmaC) ? sigmaT : 0.0;
+float sigma = cloudSigma(q, tune);
 if (rndf(seed) &lt; sigma / sigmaBar) {
     /* 真实散射事件 */
 } else {
-    transmittance *= 1.0 - sigma / sigmaBar;   // 空碰撞：比例追踪权重
+    transmittance *= 1.0 - sigma / sigmaBar;   // 空碰撞：同一个 ratio-tracking 权重
     if (transmittance.r &lt; exitFloor) { break; }
     t = tNew;
 }</code></pre>
@@ -736,45 +731,48 @@ throughput /= qRr;</code></pre>
           <p><strong>选择。</strong>加权 delta tracking。它只要求一个上界、不需要知道介质内部结构，空列成本是一次纹理取样，而且顺带把透射率算了出来。</p>
         </div>
 
-        <p>有一处已知的改进空间：当前自由飞行的上界用的是<strong>总消光</strong> <code>σt</code>，而阴影射线已经用上了「控制分量 + 残差」的分解。把分解也用到自由飞行上（decomposition tracking）能进一步降低方差，但权重 <code>σt/σr</code> 在控制分量与真实密度不匹配时会急剧放大，需要额外的手段压住它。这属于尚未落地的部分，不是遗漏。</p>
+        <p>有一处已知的改进空间：自由飞行与阴影求积读的都是<strong>总消光</strong> <code>σt</code>。把消光拆成「可解析积分的平缓分量 + 走随机估计的残差」（decomposition tracking，即残差比率追踪）能进一步压低方差，但权重 <code>σt/σr</code> 在控制分量与真实密度不匹配时会急剧放大，需要额外手段压住。这属于尚未落地的部分，不是遗漏。</p>
       </section>
 
       <!-- ================= 05 ================= -->
       <section id="s05">
-        <h2><span class="num">05</span>阴影：残差比率追踪</h2>
+        <h2><span class="num">05</span>阴影：抖动步长 Beer 求积</h2>
 
         <p class="lede">阴影射线要做的事只有一件：算出从着色点到光源之间的透射率。它的成本约束和主路径完全不同——数量多一个数量级，因此必须严格有界、且必须能容忍近似。</p>
 
-        <p>估计透射率的标准工具是比率追踪（ratio tracking，Novák 2014<sup><a href="#cite-10">[10]</a></sup>）：与 delta tracking 一样用上界抽样碰撞点，但每个点不做接受/拒绝判定，而是无条件地把运行乘积乘上 <code>(1 − σt/σ̄)</code>。这个乘积的期望就是透射率，方差比「先判定再统计」的形式低得多。</p>
+        <p>透射率的标准蒙特卡洛工具是比率追踪（ratio tracking，Novák 2014<sup><a href="#cite-10">[10]</a></sup>）：与 delta tracking 一样用上界抽样碰撞点，但每个点不做接受/拒绝判定，而是无条件地把运行乘积乘上 <code>(1 − σt/σ̄)</code>，其期望就是透射率。本实现没有走这条路线。阴影射线的数量比主路径多一个数量级，而蒙特卡洛估计量的步数是随机的、成本没有上界；这里要的是每步可数、可预测。所以阴影用的是<strong>确定性求积</strong>：把区间切成有限个步长，每步在中点求一次密度，累乘 Beer 项。</p>
 
-        <p>本项目用的是残差比率追踪，即在比率追踪之上再叠一层控制变量：把消光拆成「可解析处理的平缓部分」与「必须随机估计的残差部分」。</p>
+        <p class="code-lead">cloud.slang — 一个求积步</p>
+        <pre><code>float3 mid = origin + dir * (t + 0.5 * dt);
+float sigmaT = cloudSigma(mid, tune);
+transmittance *= exp(-sigmaT * dt);</code></pre>
 
-        <pre><code>float sigmaR   = max(sigmaT - sigmaC, 0.0);           // 残差
-float majorantR = max(sigmaBar - sigmaC, 1.0e-6);
-transmittance *= exp(-sigmaC * dt) * (1.0 - saturate(sigmaR / majorantR));</code></pre>
+        <p>因为 <code>Π exp(−σi·dt) = exp(−Σ σi·dt)</code>，这串乘法等价于用中点法则累积光学深度 <code>τ</code> 再取指数；而用 <code>exp</code> 逐步累乘还顺带带来两个好处——乘积天然被夹在 <code>[0, 1]</code> 内，且长区间上的累乘不会溢出。取中点而不是左端点不是随意的：中点法则的局部误差是 <code>O(dt²)</code>，左端点是 <code>O(dt)</code>。密度沿射线变化越快这个差别越明显，而云恰恰是「沿射线变化极快」的介质。</p>
 
-        <p>控制分量 <code>σc = coverage × profile × scale × 0.5</code>（第 02 章）不含三维噪声，在一小步内几乎不变，因此它在每个步长上被解析地积成 <code>exp(−σc·dt)</code>；只有 <code>σr = σt − σc</code> 这个高频部分进入随机估计。这不是数值上的取巧，而是方差控制的正面应用：估计量的相对波动只由残差决定，而残差在总消光里只占一小部分。</p>
+        <p>与比率追踪相比，取舍很明确：<strong>每一步不再是随机估计，而是确定性的求值</strong>。给定步长划分，透射率就是一个算出来的数，没有蒙特卡洛估计量的那层帧间涨落；代价是引入了离散化偏差，偏差量级由步长和密度的二阶变化决定。把离散化误差交给时间维度处理，而不是交给随机采样处理——这是本章后面抖动存在的全部理由。</p>
 
-        <p>上界也要跟着拆：残差的上界是 <code>σ̄ − σc</code>，并且用一个 <code>1e-6</code> 的下限保护除法。若 <code>σc</code> 恰好等于 <code>σ̄</code>，残差上界趋近 0，比率趋近 1，估计器退化成「这一步没有残差」——这是正确的极限行为，但需要避免除以零。</p>
+        <h3>抖动步长：把离散化条纹变成噪声</h3>
 
-        <h3>抖动步长：为什么不用固定格点</h3>
+        <p>阴影射线的步数由参数直接封顶（<code>shadowSteps</code>），步长取「当前点到壳层出口距离」的固定比例，于是厚云自动走更多步、薄云自动走更少步。整个步长策略只有一个旋钮。</p>
 
-        <p>阴影射线没有采用 delta tracking，而是采用「固定步数 + 步长按剩余距离缩放 + 抖动」的求积方式。原因是成本必须可预测：每个着色点、每个散射事件都要发一条阴影射线，数量随分辨率线性增长，而 delta tracking 的步数是随机的，无法给出上界。</p>
+        <p class="code-lead">cloud.slang — 步长与抖动</p>
+        <pre><code>public float cloudShadowStride(CloudTuning tune, float remaining) {
+    return clamp(remaining * tune.strideScale,
+            tune.strideScale * 30.0, tune.strideScale * 160.0);
+}
+...
+float dt = min(cloudShadowStride(tune, tExit - t) * (0.75 + 0.5 * rndf(seed)),
+        tExit - t);</code></pre>
 
-        <p class="code-lead">cloud.slang — 抖动步长</p>
-        <pre><code>float dt = q == 0 ? clamp(remaining * 0.5,  16.0, 96.0)
-        : q == 1 ? clamp(remaining * 0.4,  12.0, 64.0)
-                 : clamp(remaining * 0.34,  6.0, 48.0);
-dt *= 0.75 + 0.5 * rndf(seed);</code></pre>
+        <p>上下限也按同一个 <code>strideScale</code> 缩放，这不是偷懒：它让一个数字在整个取值范围内都保持物理意义，<code>strideScale ≈ 0.40</code> 正好复现出 12–64 格的窗口，而调这个数字时上下限的相对关系不会跑偏。上限防止一步跨过整层云而漏掉密度细节，下限保证光学厚的地方仍然有足够采样。外侧的 <code>min(..., tExit - t)</code> 则保证最后一步恰好落在出口，而不是跨过去——跨过去会把区间之外的密度也算进来。</p>
 
-        <p><code>remaining</code> 是当前点到壳层出口的距离，步长按它的固定比例取，于是厚云自动走更多步、薄云自动走更少步。上下限各司其职：上限防止一步跨过整层云而漏掉密度细节，下限保证光学厚的地方仍有足够采样。</p>
-
-        <p>末尾那行抖动是关键。若每个像素都用同样的步长划分，求积误差会变成一个<strong>与像素位置相关、且帧间不变</strong>的固定偏差——画面上会出现以光源方向为中心的同心带或规则条纹，而且它不会随时间收敛，因为每帧算的都是同一个错误的积分。抖动把这一步的误差变成一个零均值的随机量，DLSS-RR 的时间累积（把相邻若干帧的结果加权平均）就能把它收敛掉。这正是这套实现敢于只用 8–24 步的原因：时间维度承担了大部分采样压力。</p>
+        <p>末尾那行抖动是关键。若每个像素都用同样的步长划分，求积误差会变成一个<strong>与像素位置相关、且帧间不变</strong>的固定偏差——画面上会出现以光源方向为中心的同心带或规则条纹，而且它不会随时间收敛，因为每帧算的都是同一个错误的积分。抖动把这一步的误差变成一个零均值的随机量，DLSS-RR 的时间累积（把相邻若干帧的结果加权平均）就能把它收敛掉。这正是这套实现敢于只用十几步的原因：时间维度承担了大部分采样压力。</p>
 
         <div class="trade">
           <span class="tag">为什么不这么做 · 阴影估计</span>
-          <p><strong>对阴影射线也用 delta tracking。</strong>无偏、无步长参数，但成本随机且没有上界；阴影射线数量远大于主路径，成本不可控不可接受。</p>
-          <p><strong>不用抖动、纯固定格点。</strong>省一次随机数，代价是上一层永久性的可见条纹。</p>
+          <p><strong>对阴影射线也用 delta / 比率追踪。</strong>无偏、没有步长参数，但步数随机、成本没有上界；阴影射线数量远大于主路径，成本不可控不可接受。</p>
+          <p><strong>不做抖动、纯固定格点。</strong>省一次随机数，代价是上一层永久性的可见条纹。</p>
+          <p><strong>只取左端点、不取中点。</strong>省一次加法，但把局部误差从二阶降回一阶，厚云处会系统性偏亮。</p>
           <p><strong>直接解析求解。</strong>密度场没有解析原函数，无法积分。</p>
         </div>
 
@@ -803,11 +801,11 @@ if (max(result.transmittance.r, max(result.transmittance.g, result.transmittance
 
         <p class="code-lead">cloud.slang — 一次散射事件的局部光照</p>
         <pre><code>float3 luminance  = celestialLight.illuminance * phase * shadowTerm;
-luminance += celestialLight.illuminance * (ms.rgb * (sigmaT * first));
-luminance += cloudSkyAmbient(p, sky)     * (ms.a   * (sigmaT * first));
-return luminance * CLOUD_MS_STRENGTH;</code></pre>
+luminance += CLOUD_MS_STRENGTH * celestialLight.illuminance * (ms.rgb * (sigmaT * first));
+luminance += CLOUD_MS_STRENGTH * cloudSkyAmbient(p, sky)     * (ms.a   * (sigmaT * first));
+return luminance;</code></pre>
 
-        <p>三项依次是：一阶太阳/月亮 NEE（相位 × 自阴影透射率）、多重散射 LUT 的高阶通道、以及天顶环境光乘 LUT 的环境通道。后两项都被 <code>first</code> 门控，只在一次云遭遇的第一次散射事件上收费。</p>
+        <p>三项依次是：一阶太阳/月亮 NEE（相位 × 自阴影透射率）、多重散射 LUT 的高阶通道、以及天顶环境光乘 LUT 的环境通道。后两项都被 <code>first</code> 门控，只在一次云遭遇的第一次散射事件上收费；两者也是 <code>CLOUD_MS_STRENGTH</code> 这个 LUT 标定系数的缩放对象，而一阶 NEE 项不在其列——它走精确相位与精确自阴影，不属于 LUT 标定的范畴。</p>
 
         <h3>银边从哪里来</h3>
 
@@ -826,7 +824,7 @@ return luminance * CLOUD_MS_STRENGTH;</code></pre>
           <p>LUT 存的是「每单位光照的各向同性 fluence」，烘焙时已经折进 <code>1/(4π)</code>。运行时的源项是各向同性再发射，发射率正比于局部消光，所以用 <code>σt</code> 缩放 LUT 就得到源项。这样同一张表可以用于任意密度的云，不需要按密度重烘焙——这是把三维参数化压成二维的关键一步。</p>
         </div>
 
-        <p>只在首事件收费，是为了避免双重计数。云内的真实反弹（<code>CLOUD_MAX_BOUNCES = 6</code>）已经把二阶、三阶的一部分真的算了一遍：每散射一次，<code>throughput</code> 乘一次反照率，路径继续跑，这些事件贡献的是货真价实的高阶散射。如果每个事件再叠加一次 LUT，同一份能量会被加两次，云的内部会明显过亮。所以约定是——进入一团云的第一次散射补上「这一小段路径没算到的高阶」，之后的每一个事件靠真实反弹自己解决。</p>
+        <p>只在首事件收费，是为了避免双重计数。云内的真实反弹（受路径循环的 <code>maxBounces</code> 与俄罗斯轮盘共同限制）已经把二阶、三阶的一部分真的算了一遍：每散射一次，<code>throughput</code> 乘一次反照率，路径继续跑，这些事件贡献的是货真价实的高阶散射。如果每个事件再叠加一次 LUT，同一份能量会被加两次，云的内部会明显过亮。所以约定是——进入一团云的第一次散射补上「这一小段路径没算到的高阶」，之后的每一个事件靠真实反弹自己解决。</p>
 
         <p>代价是这个近似并不完美：真实反弹被 <code>maxBounces</code> 与轮盘限制在半路，而 LUT 只在入口补过一次，云深处的能量会略偏低。这是刻意接受的折中，作者在注释里把它标注为有限反弹加 LUT 兜底的方案。</p>
 
@@ -834,7 +832,7 @@ return luminance * CLOUD_MS_STRENGTH;</code></pre>
 
         <p class="code-lead">cloud.slang — 云点处的天顶环境光</p>
         <pre><code>float altitudeKm = worldPush.cloudLook0.w + (p.y - bottom) / 100.0;
-float radiusKm = clamp(ATMOS_BOTTOM_KM + max(altitudeKm, MIN_VIEWER_ALTITUDE_KM),
+float radiusKm = clamp(ATMOS_BOTTOM_KM + altitudeKm,
         ATMOS_BOTTOM_KM + MIN_VIEWER_ALTITUDE_KM, ATMOS_TOP_KM);
 float2 sunUv  = skyViewLutUv(radiusKm, 1.0, lightViewCosine(up, sky.sunDir),  SKY_VIEW_BODY_SUN);
 float2 moonUv = skyViewLutUv(radiusKm, 1.0, lightViewCosine(up, sky.moonDir), SKY_VIEW_BODY_MOON);
@@ -851,7 +849,7 @@ return skyViewLut.SampleLevel(sunUv, 0.0).rgb + skyViewLut.SampleLevel(moonUv, 0
 
         <p class="lede">云不是被当成一个「额外效果」插进渲染管线，而是被编织进既有的路径循环里：一次云内散射就是一次反弹。这个接法让云直接复用了现有的反弹预算、RIS 直接光、俄罗斯轮盘和时间累积。</p>
 
-        <p>传输层的对外接口是 <code>cloudIntegrate()</code>，它接收一段射线的起点、方向与壳层区间，返回三种结果之一：</p>
+        <p>传输层的对外接口是 <code>cloudIntegrate()</code>：一段射线的起点、方向与壳层区间，加一个「本段是否延续同一团云」的标记，以及一份打包的路径状态（吞吐率、亮度、随机数流、剩余反弹预算）。它返回一个 <code>CloudSegment</code>，其中的 <code>outcome</code> 是三种结果之一：</p>
 
         <div class="table-wrap">
           <table>
@@ -863,12 +861,12 @@ return skyViewLut.SampleLevel(sunUv, 0.0).rgb + skyViewLut.SampleLevel(moonUv, 0
               <tr>
                 <th scope="row">PASSTHROUGH</th>
                 <td>段内没有发生真实散射，云只按透射率衰减了这段路径</td>
-                <td><code>throughput *= cloudTrans</code>，继续用原来的射线方向处理表面命中或天空</td>
+                <td><code>throughput *= seg.transmittance</code>，继续用原来的射线方向处理表面命中或天空</td>
               </tr>
               <tr>
                 <th scope="row">SCATTERED</th>
                 <td>段内发生了一次真实散射，路径从散射点按相位函数继续</td>
-                <td>用返回的 <code>segOrigin</code> / <code>segDir</code> 替换当前射线，<code>continue</code> 进入下一次循环</td>
+                <td>用返回的 <code>seg.segOrigin</code> / <code>seg.segDir</code> 替换当前射线，<code>continue</code> 进入下一次循环</td>
               </tr>
               <tr>
                 <th scope="row">TERMINATED</th>
@@ -881,23 +879,25 @@ return skyViewLut.SampleLevel(sunUv, 0.0).rgb + skyViewLut.SampleLevel(moonUv, 0
 
         <p>用枚举而不是「直接返回颜色」，是因为段积分的语义是<strong>改变路径状态</strong>而不是产生一个终值。三种结果对应的后续动作完全不同，必须显式区分；把它压成一个颜色返回值会让调用方无法判断该继续追踪还是该收尾。</p>
 
-        <p>循环里的替换只有三行，但有一个必须遵守的约定：<code>SCATTERED</code> 分支只设置状态后 <code>continue</code>，<strong>不手动递增反弹计数</strong>。云散射消耗一次弹射预算这件事由循环自身的 <code>bounce++</code> 完成；如果在分支里再手动加一次，一次云事件会被扣两次预算，云的深度会明显变浅。代码注释把这个坑写在了显眼的位置。</p>
+        <p>循环里回写状态、替换射线只有几行，但有一个必须遵守的约定：<code>SCATTERED</code> 分支只设置状态后 <code>continue</code>，<strong>不手动递增反弹计数</strong>。云散射消耗一次弹射预算这件事由循环自身的 <code>bounce++</code> 完成；如果在分支里再手动加一次，一次云事件会被扣两次预算，云的深度会明显变浅。代码注释把这个坑写在了显眼的位置。</p>
 
         <p class="code-lead">indirect.rgen.slang — 一次云事件接回路径循环</p>
-        <pre><code>CloudOutcome outcome = cloudIntegrate(ro, rd, 10000.0, tEnter, tExit,
-        !inCloudMass, throughput, L, seed, budget,
-        cloudTrans, segOrigin, segDir);
-if (outcome == CloudOutcome.SCATTERED) {
-    ro = segOrigin;
-    rd = segDir;
+        <pre><code>CloudPathState state = cloudPathState(throughput, L, seed, maxBounces - bounce);
+CloudSegment seg = cloudIntegrate(ro, rd, tEnter, tExit, inCloudMass, state);
+throughput = state.throughput;
+L          = state.luminance;
+seed       = state.seed;
+if (seg.outcome == CloudOutcome.SCATTERED) {
+    ro = seg.segOrigin;
+    rd = seg.segDir;
     showCelestial = false;   // 直接光刚由这次散射的 NEE 处理过
     inCloudMass = true;
     continue;                // 循环自增扣一次反弹预算
 }
-if (outcome == CloudOutcome.TERMINATED) { break; }
-throughput *= cloudTrans;</code></pre>
+if (seg.outcome == CloudOutcome.TERMINATED) { break; }
+throughput *= seg.transmittance;</code></pre>
 
-        <p><code>firstEvent</code> 由 <code>!inCloudMass</code> 给出，而 <code>inCloudMass</code> 只在「一次没有发生散射的段积分结束」时复位。语义是：只要路径还在同一团云里连续反弹，MS LUT 就只收一次费；一旦路径离开云（无论是穿出去还是被表面挡住），下一次再进入云就是新的一团，需要重新补上高阶能量。</p>
+        <p>调用方传的是 <code>continuingCloudMass</code>（即 <code>inCloudMass</code>），段积分内部取反得到「本次遭遇的首个事件」，而 <code>inCloudMass</code> 只在「一次没有发生散射的段积分结束」时复位。语义是：只要路径还在同一团云里连续反弹，MS LUT 就只收一次费；一旦路径离开云（无论是穿出去还是被表面挡住），下一次再进入云就是新的一团，需要重新补上高阶能量。</p>
 
         <h3>两个插入点与一处已知边角</h3>
 
@@ -966,13 +966,13 @@ throughput *= cloudTrans;</code></pre>
         <p>coverage 场是五次倍频程的二维 fBm，每帧要对 128² = 16384 个纹素求值，每个纹素约 5 次噪声采样。如果让每个追踪步都直接算这个场，成本会随步数再放大一个数量级。烘成纹理之后，运行时的代价是一次硬件双线性插值采样——几乎免费，而且插值本身还顺手把场变平滑了，省掉手工插值的代码。</p>
 
         <p class="code-lead">weather.comp.slang — 一个纹素</p>
-        <pre><code>float2 windOffset = cloudWindDirStatic() * max(push.cloudLook0.y, 0.0) * push.cloudLook0.z;
+        <pre><code>float2 windOffset = cloudWindOffset(push.cloudLook0.yz);
 float2 uv = (float2(tid.xy) + 0.5) / float(WEATHER_SIZE);   // 纹素中心
 float coverage = weatherCoverageField(uv, saturate(push.cloudLook0.x), windOffset);
 float type     = weatherTypeField(uv, windOffset);
 weatherImage[tid.xy] = float4(coverage, type, 0.0, 1.0);</code></pre>
 
-        <p>风场在烘焙端就被折进 uv，而不是在运行时做偏移。这样做的好处在第 03 章已经出现过一次：天气图与列上界网格都用同一个 <code>windOffset</code> 平流，于是两者永远对齐。运行时的 <code>cloudWindOffset()</code> 则只用于滚动三维形状噪声的域，让云内部的细节随时间漂移——天气图已经是平流过的，不需要再动。</p>
+        <p>风场在烘焙端就被折进 uv，而不是在运行时做偏移。这样做的好处在第 03 章已经出现过一次：天气图与列上界网格都用同一个 <code>windOffset</code> 平流，于是两者永远对齐。<code>cloudWindOffset()</code> 是运行时与两个 bake 共用的同一个实现——烘焙 pass 各自持有自己的 <code>WorldPush</code> 副本，读不到运行时的全局，所以风速与时间以参数传入，三处不可能漂移。</p>
 
         <p>采样取的是纹素中心 <code>(tid + 0.5) / size</code> 而不是格点。这是一个很小的正确性细节：如果采样点落在纹素边界上，双线性插值会混入邻格的值，天气图的边界会糊掉一像素宽。</p>
 
@@ -985,11 +985,11 @@ weatherImage[tid.xy] = float4(coverage, type, 0.0, 1.0);</code></pre>
     float3 pos = float3(0.0, 0.0, 0.0);
     int order = 0;
     for (int hop = 0; hop &lt; 256; hop++) {
-        pos += dir * freePath(seed);                     // 指数分布自由程（σt = 1）
-        if (pos.z &lt; 0.0 || pos.z &gt; MS_LUT_TAU_MAX) { return; }   // 逃出顶部 / 离开烘焙域
+        pos += dir * cloudFreePath(seed);                // 指数分布自由程（σt = 1）
+        if (pos.z &lt; 0.0 || pos.z &gt; CLOUD_MS_LUT_TAU_MAX) { return; }   // 逃出顶部 / 离开烘焙域
         order++;
         if (order &gt;= 2) {                                // 只沉积第 2 阶及以后
-            int bin = min(int(pos.z / MS_LUT_TAU_MAX * float(MS_LUT_SIZE)), MS_LUT_SIZE - 1);
+            int bin = min(int(pos.z / CLOUD_MS_LUT_TAU_MAX * float(MS_LUT_SIZE)), MS_LUT_SIZE - 1);
             bins[bin] += w;
         }
         w *= CLOUD_ALBEDO;
@@ -1166,11 +1166,11 @@ float cloudTime = (float) (System.nanoTime() / 1.0e9 % 3600.0);</code></pre>
 
         <p>注意「主路径步数」这一行的含义与阴影不同：主路径用的是指数分布自由程，没有固定步长，这个上限只约束单次段积分里最多抽样多少次，用来兜住极端光学厚的情况；正常路径通常在撞到上限之前就被俄罗斯轮盘或透射率阈值结束了。阴影行则真的有步长，因为那里是固定步数的求积。</p>
 
-        <p>七个参数都只改评估成本，保持不变的是全部<strong>物理与估计器</strong>：相位函数与其采样、加权 delta tracking 的估计量、残差比率追踪的控制分量拆法、MS LUT 的内容、以及天气图、列上界网格、MS LUT 的烘焙结果。于是任意组合都是多帧收敛过程里的一个参数变化，不会引入几何或颜色上的突变。</p>
+        <p>七个参数都只改评估成本，保持不变的是全部<strong>物理与估计器</strong>：相位函数与其采样、自由飞行的加权 delta tracking 估计量、阴影透射率的抖动步长求积、MS LUT 的内容、以及天气图、列上界网格、MS LUT 的烘焙结果。于是任意组合都是多帧收敛过程里的一个参数变化，不会引入几何或颜色上的突变。</p>
 
-        <p>实测数据给默认值提供了依据：七个参数的出厂值正是此前调优过的「均衡」组合（倍频程 3、8 邻域侵蚀、主路径 24 步、阴影 12 步、步长比例 0.40、早退 0.020、事件阴影 1），因此拆分前后的默认画面一致；此前的「旗舰」组合则对应倍频程 3、27 邻域侵蚀、主路径 40 步、阴影 24 步、步长比例 0.34、早退 0.005、事件阴影 2，它在重云量场景下把帧率从关闭云时的 198 FPS 拉到 74 FPS，也就是云占了约 8.5 ms/帧，而预算是约 3 ms，超出约 2.5 倍。其中最贵的单项是「每次事件都做精确阴影」：<code>CLOUD_MAX_BOUNCES</code> 为 6，一条路径最多触发 6 次完整的透射率行走，而事件阴影精度取 1 时只在首次事件做，相差约 12 倍的工作量。另有两个零画质损失的提前退出承担了大头：透射率阈值截断，以及 <code>visibility()</code> 里「TLAS 已经全遮挡就跳过整段云步进」——后者在森林和洞穴场景里省掉的是最贵的一段。</p>
+        <p>实测数据给默认值提供了依据：七个参数的出厂值正是此前调优过的「均衡」组合（倍频程 3、8 邻域侵蚀、主路径 24 步、阴影 12 步、步长比例 0.40、早退 0.020、事件阴影 1），因此拆分前后的默认画面一致；此前的「旗舰」组合则对应倍频程 3、27 邻域侵蚀、主路径 40 步、阴影 24 步、步长比例 0.34、早退 0.005、事件阴影 2，它在重云量场景下把帧率从关闭云时的 198 FPS 拉到 74 FPS，也就是云占了约 8.5 ms/帧，而预算是约 3 ms，超出约 2.5 倍。其中最贵的单项是「每次事件都做精确阴影」：云事件的次数上限由路径循环的 <code>maxBounces</code>（默认 4）给出，每条路径最多触发相同次数的完整透射率行走，而事件阴影精度取 1 时只在首次事件做，两者相差数倍的工作量。另有两个零画质损失的提前退出承担了大头：透射率阈值截断，以及 <code>visibility()</code> 里「TLAS 已经全遮挡就跳过整段云步进」——后者在森林和洞穴场景里省掉的是最贵的一段。</p>
 
-        <p>尚未落地的部分同样明确，它们不是实现遗漏，而是有意分阶段：把太阳 NEE 的可见性做成可复用的 reservoir（Volumetric ReSTIR 那条路线<sup><a href="#cite-11">[11]</a></sup>）、把控制分量拆解用到自由飞行上、为密度场与 LUT 建数值回归测试、以及接入 NRD 作为 DLSS-RR 之外的降噪回退。</p>
+        <p>尚未落地的部分同样明确，它们不是实现遗漏，而是有意分阶段：把太阳 NEE 的可见性做成可复用的 reservoir（Volumetric ReSTIR 那条路线<sup><a href="#cite-11">[11]</a></sup>）、为消光引入控制变量分解（decomposition tracking）以压低追踪与求积的方差、为密度场与 LUT 建数值回归测试、以及接入 NRD 作为 DLSS-RR 之外的降噪回退。</p>
       </section>
 
       <!-- ================= 11 ================= -->
@@ -1214,7 +1214,7 @@ float cloudTime = (float) (System.nanoTime() / 1.0e9 % 3600.0);</code></pre>
               </tr>
               <tr>
                 <th scope="row">阴影透射率</th>
-                <td>残差比率追踪 + 抖动步长</td>
+                <td>抖动步长 Beer 求积（中点法）</td>
                 <td>阴影射线也用 delta tracking</td>
                 <td>阴影射线数量大，成本必须严格有界；确定性格点会把求积偏差固化成可见条纹</td>
               </tr>
@@ -1306,14 +1306,13 @@ float cloudTime = (float) (System.nanoTime() / 1.0e9 % 3600.0);</code></pre>
             </thead>
             <tbody>
               <tr><th scope="row">蒙特卡洛积分</th><td>用随机样本的平均值估计积分，误差随样本数下降</td><td>MS LUT 烘焙；路径积分的整体框架</td></tr>
-              <tr><th scope="row">无偏估计量</th><td>估计量的期望等于真值</td><td>权重与概率成对修改（轮盘、空碰撞）以保持无偏</td></tr>
+              <tr><th scope="row">无偏估计量</th><td>估计量的期望等于真值</td><td>自由飞行与轮盘靠权重/概率成对修改保持无偏；阴影求积则刻意选择有偏但确定（见第 05 章）</td></tr>
               <tr><th scope="row">自由程抽样</th><td>均匀介质中自由程服从指数分布，可解析反演</td><td><code>s = −ln(ξ)/σ̄</code></td></tr>
               <tr><th scope="row">上界（majorant）</th><td>不小于场内任何局部消光的常数，用作抽样基准</td><td>逐列上界网格 + 全局常数</td></tr>
               <tr><th scope="row">delta / Woodcock tracking</th><td>用上界抽样候选点，再按概率判真伪，等价于异质介质</td><td><code>cloudIntegrate()</code> 的主循环</td></tr>
               <tr><th scope="row">空碰撞</th><td>被判为「假」的候选点，不产生任何效果</td><td>累乘 <code>(1 − σt/σ̄)</code> 后继续</td></tr>
               <tr><th scope="row">加权 delta tracking</th><td>在空碰撞时累乘权重，使一次行走同时给出透射率</td><td>主路径的透射率来源</td></tr>
-              <tr><th scope="row">比率追踪</th><td>不对候选点做接受/拒绝，无条件下乘比率，方差更低</td><td>阴影透射率的估计框架</td></tr>
-              <tr><th scope="row">控制变量 / 残差分解</th><td>把可解析的部分分离出来，只对残差做随机估计以降低方差</td><td>σc 解析积分，σr 进入比率追踪</td></tr>
+              <tr><th scope="row">中点法求积</th><td>把区间切成有限步，在每步中点求值以取得二阶精度</td><td><code>cloudTransmittance()</code> 的阴影透射率</td></tr>
               <tr><th scope="row">俄罗斯轮盘</th><td>按贡献概率终止路径并除以概率，保持无偏同时砍掉低价值路径</td><td>云内每次散射后执行</td></tr>
               <tr><th scope="row">抖动 / 分层求积</th><td>给确定性求积格点加随机偏移，把系统偏差转为可被时间平均掉的噪声</td><td>阴影步长末尾的 <code>0.75 + 0.5·ξ</code></td></tr>
               <tr><th scope="row">时间累积</th><td>跨帧平均随机估计结果，用时间维度换取每帧的低采样率</td><td>依赖 DLSS-RR，是低步数成立的前提</td></tr>
@@ -1351,7 +1350,7 @@ float cloudTime = (float) (System.nanoTime() / 1.0e9 % 3600.0);</code></pre>
             </thead>
             <tbody>
               <tr><th scope="row">平板求交</th><td>射线与一对平行平面求交得到参数区间</td><td><code>cloudShellInterval()</code></td></tr>
-              <tr><th scope="row">DDA 网格步进</th><td>逐轴计算到下一格边界的距离，取最小者前进</td><td><code>nextColumnDistance()</code></td></tr>
+              <tr><th scope="row">DDA 网格步进</th><td>逐轴计算到下一格边界的距离，取最小者前进</td><td><code>cloudNextColumnDistance()</code></td></tr>
               <tr><th scope="row">Buffer device address</th><td>用裸 GPU 地址访问缓冲区，绕过描述符与推送常量大小限制</td><td><code>PushAddr</code> 让烘焙读同一份 <code>WorldPush</code></td></tr>
               <tr><th scope="row">描述符集</th><td>把一组资源绑定成一个整体供 shader 访问</td><td>烘焙用独立 set，世界管线用另一套</td></tr>
               <tr><th scope="row">存储视图 / 采样视图</th><td>同一图像可按可写或可读方式绑定，布局要求不同</td><td>compute 写用 <code>GENERAL</code>，raygen 读用采样器</td></tr>
@@ -1377,7 +1376,7 @@ float cloudTime = (float) (System.nanoTime() / 1.0e9 % 3600.0);</code></pre>
         <li id="cite-7">Jendersie &amp; d'Eon, <em>An Approximate Mie Scattering Function for Fog and Cloud Rendering</em>（SIGGRAPH 2023）：HG + Draine 双瓣拟合式（eqs. 4–7）的来源。文本见仓库 <code>docs/papers/mie2023.txt</code> 与 <code>docs/papers/draine.hlsl</code>。</li>
         <li id="cite-8">NVIDIA, <code>draine.hlsl</code>：Draine 相位 CDF 反演的参考实现（MIT 许可）。见仓库 <code>docs/papers/draine.hlsl</code>。</li>
         <li id="cite-9">A. Schneider, <em>Nubis</em> 系列（HZD 2015 / Nubis 2017 / Nubis Evolved 2022）：天气图驱动的云形状配方、只侵蚀边缘的重映射、银边与光照模型。文本见仓库 <code>docs/papers/nubis2017.txt</code>。</li>
-        <li id="cite-10">Novák 等（2014）：残差比率追踪与零散射估计量的来源。本实现的阴影透射率沿用其框架。</li>
+        <li id="cite-10">Novák 等（2014）：比率追踪与零散射（空碰撞）估计量的来源。本实现的自由飞行沿用其估计量形式；阴影透射率则改用中点法求积（见第 05 章）。</li>
         <li id="cite-11">Lin, Wyman &amp; Yüksel, <em>Volumetric ReSTIR</em>（2021）：本实现传输框架所属的基线族，也是尚未落地的 reservoir 复用方向。</li>
         <li id="cite-12">M. Wrenninge 等，多重散射八度（multiple-scattering octaves）：用逐级近似项逼近云内高阶散射的经典做法，本实现改用蒙特卡洛烘焙 LUT 取代其经验常数。</li>
       </ol>

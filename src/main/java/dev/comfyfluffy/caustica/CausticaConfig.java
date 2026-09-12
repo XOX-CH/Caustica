@@ -688,8 +688,8 @@ public final class CausticaConfig {
             // is the one that reads as detail up close.
             public static final IntSetting SHAPE_OCTAVES =
                     clampedInt("caustica.rt.cloudShapeOctaves", "cloud.shape-octaves", 3, 1, 6);
-            // Erosion neighbourhood: 0 = none, 1 = 8-cell Worley (worley3Cheap), 2 = 27-cell Worley
-            // (worley3). The 27-cell search is the single most expensive term in a density
+            // Erosion neighbourhood: 0 = none, 1 = 8-cell Worley (worley3x8), 2 = 27-cell Worley
+            // (worley3x27). The 27-cell search is the single most expensive term in a density
             // evaluation, making this the largest per-sample cost knob.
             public static final IntSetting EROSION =
                     clampedInt("caustica.rt.cloudErosion", "cloud.erosion", 1, 0, 2);
