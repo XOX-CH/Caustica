@@ -12,10 +12,11 @@
 //   * free-flight sampling — weighted delta tracking (Woodcock) on the total extinction; the
 //     majorant comes from a macrogrid of per-column maxima, the null-scattering equivalent of
 //     empty-space skipping (research doc §7.2 "majorant macrogrid");
-//   * NEE transmittance    — jittered-stride residual ratio tracking (Novák 2014): the
-//     low-frequency control component (coverage × height profile) is integrated in closed form,
-//     the residual is ratio-tracked. Deterministic strides make this a consistent quadrature that
-//     DLSS-RR's temporal accumulation converges, which is how every production shadow march ships;
+//   * NEE transmittance    — deterministic stride quadrature of the Beer integral: σt is analytic
+//     at every point, so a jittered midpoint sum is a consistent Riemann sum with no stochastic
+//     estimator and no control/residual split to go wrong. DLSS-RR's temporal accumulation
+//     integrates the residual quadrature error away, which is how every production shadow march
+//     ships;
 //   * phase                — HG+Draine approximate Mie (Jendersie & d'Eon, SIGGRAPH 2023), fitted
 //     droplet-diameter parameterisation, fully analytic evaluation and CDF-inverted sampling;
 //   * multiple scattering  — real path bounces (Russian roulette on the cloud albedo, capped) plus
@@ -33,15 +34,6 @@ import bindings;
 import math;
 import sky;
 import cloud_field;
-
-// ---- Wind ---------------------------------------------------------------------------------------
-
-// Horizontal advection of the weather domain, in blocks, at the pushed wind speed. The weather
-// and macrogrid textures are baked already advected, so this offset feeds only the shape-noise
-// domain scroll (detail shears through the coverage mask the way Nubis' curl pass does).
-public float2 cloudWindOffset() {
-    return cloudWindDirStatic() * max(worldPush.cloudLook0.y, 0.0) * worldPush.cloudLook0.z;
-}
 
 // ---- Per-parameter tuning -----------------------------------------------------------------------
 //
@@ -82,10 +74,10 @@ public CloudTuning cloudTuning() {
 }
 
 // Transmittance stride length for one step; the caller applies the per-stride jitter. Both clamp
-// bounds scale with the ratio so a single number stays physical across its whole range: 0.40
-// reproduces the 12–64 block window the tracker was tuned against.
-public float cloudShadowStride(float strideScale, float remaining) {
-    return clamp(remaining * strideScale, strideScale * 30.0, strideScale * 160.0);
+// bounds scale with the tuning's stride fraction so a single number stays physical across its whole
+// range: 0.40 reproduces the 12–64 block window the tracker was tuned against.
+public float cloudShadowStride(CloudTuning tune, float remaining) {
+    return clamp(remaining * tune.strideScale, tune.strideScale * 30.0, tune.strideScale * 160.0);
 }
 
 // Whether this scattering event runs the exact transmittance walk rather than the tau-based Beer
@@ -110,67 +102,65 @@ public float2 cloudWorldXz(float3 p) {
 
 // ---- Density field ------------------------------------------------------------------------------
 
-// Weather lookup: one wrapping tile of CLOUD_WEATHER_SPAN across XZ. The bake already advected
-// and biased the field (weatherCoverageField in cloud_field), so the runtime lookup is a plain wrap.
+// The weather tile's UV for a world position: one wrapping CLOUD_WEATHER_SPAN tile across XZ. The
+// weather map and the macrogrid are both indexed by it, so the wrap lives here once.
+public float2 cloudWeatherUv(float3 p) {
+    return frac(cloudWorldXz(p) / CLOUD_WEATHER_SPAN);
+}
+
+// Weather lookup: the bake already advected and biased the field (weatherCoverageField in
+// cloud_field), so the runtime lookup is a plain wrap.
 // R = coverage 0..1, G = cloud type 0..1 (0 = stratus .. 1 = cumulus).
 public float2 sampleWeather(float3 p) {
-    float2 uv = frac(cloudWorldXz(p) / CLOUD_WEATHER_SPAN);
-    return cloudWeatherTex.SampleLevel(uv, 0.0).rg;
+    return cloudWeatherTex.SampleLevel(cloudWeatherUv(p), 0.0).rg;
 }
 
 // Per-column majorant, 1/blocks: the baked per-cell max coverage gates whether the column can
 // hold any cloud at all. Density never exceeds CLOUD_MAX_SIGMA × scale, so a covered column's
 // bound is that constant and an empty column's is 0 — the macrogrid exists to tell them apart
 // one fetch at a time.
-public float columnMajorant(float3 p) {
-    float2 uv = frac(cloudWorldXz(p) / CLOUD_WEATHER_SPAN);
-    float maxCoverage = cloudMacroGrid.SampleLevel(uv, 0.0).r;
+public float cloudColumnMajorant(float3 p) {
+    float maxCoverage = cloudMacroGrid.SampleLevel(cloudWeatherUv(p), 0.0).r;
     return maxCoverage > 0.003 ? CLOUD_MAX_SIGMA * max(worldPush.cloudLook1.z, 0.0) : 0.0;
 }
 
-// Full density evaluation: sigma_t in 1/blocks at p (rebased world space) plus the low-frequency
-// control component for residual tracking. False above/below the shell or in empty columns.
-public bool cloudSigma(float3 p, out float sigmaT, out float sigmaControl) {
-    sigmaT = 0.0;
-    sigmaControl = 0.0;
+// Density sample: returns σt in 1/blocks at p (rebased world space). A zero return means p is
+// outside the shell, in an empty column, or under the height profile's floor — the caller's cue
+// to treat the point as vacuum.
+public float cloudSigma(float3 p, CloudTuning tune) {
     float bottom = worldPush.cloudLook1.x;
     float top = worldPush.cloudLook1.y;
     if (p.y < bottom || p.y > top) {
-        return false;
+        return 0.0;
     }
     float2 weather = sampleWeather(p);
     float coverage = weather.r;
     if (coverage <= 0.003) {
-        return false;
+        return 0.0;
     }
     float type = weather.g;
     float hf = (p.y - bottom) / max(top - bottom, 1.0);
     float profile = heightProfile(hf, type);
     if (profile <= 0.003) {
-        return false;
+        return 0.0;
     }
 
     float scale = CLOUD_MAX_SIGMA * max(worldPush.cloudLook1.z, 0.0);
-    // Control component: coverage × profile — piecewise-constant per weather column, no 3D
-    // noise, so the residual estimator integrates it in closed form over any sub-segment.
-    sigmaControl = coverage * profile * scale * 0.5;
 
     // Shape: 3D fBm gated by coverage (Nubis' threshold remap), then eroded by Worley. Coverage
     // controls WHERE clouds exist; peak density inside a cloud is independent of coverage, which
     // is why the macrogrid majorant is the global CLOUD_MAX_SIGMA × scale for any covered column.
-    CloudTuning tune = cloudTuning();
     float3 sp = float3(cloudWorldXz(p) * CLOUD_SHAPE_FREQ, p.y * CLOUD_SHAPE_FREQ);
-    float2 wo = cloudWindOffset();
+    float2 wo = cloudWindOffset(worldPush.cloudLook0.yz);
     float shape = fbm3(sp + float3(wo.x, 0.0, wo.y) * CLOUD_SHAPE_FREQ, tune.shapeOctaves);
-    float density = cloudRemap(shape * profile, 1.0 - coverage, 1.0, 0.0, 1.0);
+    float density = cloudRemap(shape * profile, 1.0 - coverage, 1.0);
     if (density > 0.0 && tune.erosion >= 1) {
         float2 eolXz = cloudWorldXz(p) * CLOUD_EROSION_FREQ;
         float3 ep = float3(eolXz.x + worldPush.cloudLook0.z * 0.01, p.y * CLOUD_EROSION_FREQ, eolXz.y);
-        float erosion = tune.erosion >= 2 ? worley3(ep) : worley3Cheap(ep);
-        density = cloudRemap(density, erosion * CLOUD_EROSION_STRENGTH * (1.0 - density), 1.0, 0.0, 1.0);
+        float erosion = tune.erosion >= 2 ? worley3x27(ep) : worley3x8(ep);
+        density = cloudRemap(density, erosion * CLOUD_EROSION_STRENGTH * (1.0 - density), 1.0);
     }
-    sigmaT = density * scale;
-    return sigmaT > 0.0;
+    return density * scale;
 }
 
 // ---- Shell geometry ------------------------------------------------------------------------------
@@ -179,7 +169,7 @@ public bool cloudSigma(float3 p, out float sigmaT, out float sigmaControl) {
 // it never will (near-vertical rays stay in one column; that column's majorant answers for the
 // whole remaining interval). Both the macrogrid and the weather field are indexed in world XZ —
 // the bake advects internally, so the runtime needs no offset here.
-float nextColumnDistance(float3 p, float3 rd, float tMax) {
+float cloudNextColumnDistance(float3 p, float3 rd, float tMax) {
     float2 rel = cloudWorldXz(p) / CLOUD_MACRO_CELL;
     float2 d = rd.xz / CLOUD_MACRO_CELL;
     float best = tMax;
@@ -230,16 +220,22 @@ public bool cloudShellInterval(float3 ro, float3 rd, float tMax, out float tEnte
     return tExit > tEnter;
 }
 
-// ---- Shadow transmittance: residual ratio tracking ----------------------------------------------
+// ---- Shadow transmittance: deterministic midpoint quadrature -------------------------------------
 
 /**
  * Transmittance of the cloud shell along [origin, origin + dir·tMax] for NEE shadow rays.
  *
- * Jittered-stride residual ratio tracking (Novák 2014): the control component (coverage ×
- * profile, piecewise-constant per weather column) is integrated in closed form per stride; the
- * high-frequency residual is estimated by Π(1 − σr/σ̄r) with the per-column majorant. Strides
- * carry a blue-noise-ish jitter so DLSS-RR integrates the quadrature error away over frames.
- * Empty columns cost one macrogrid fetch (plus cell-boundary hops) and return 1.
+ * Every stride contributes exp(−σt·dt) evaluated at its midpoint, so the walk is a Riemann sum of
+ * the Beer integral and its only error is the quadrature truncation — which shrinks with the
+ * stride fraction. The midpoint keeps the local truncation O(dt²) instead of O(dt): the height
+ * profile spans the whole shell, so one stride's far end can be far denser than its near end and
+ * an endpoint rule would bias dense cores dark. Strides carry a blue-noise-ish jitter so DLSS-RR
+ * integrates the residual quadrature error away over frames.
+ *
+ * σt is analytic at any point (cloudSigma), so the walk needs no stochastic estimator and no
+ * control/residual split: any such split would have to hold a control component that is provably
+ * below σt, and σt is gated by the shape noise, which nothing above it can bound. Empty columns
+ * still cost one macrogrid fetch (plus cell-boundary hops) and return 1.
  *
  * Cost rides the estimator knobs: stride count, stride fraction and the early-exit floor are each
  * pushed individually. The early exit is the classic production transmittance cut — once the
@@ -259,25 +255,25 @@ public float3 cloudTransmittance(float3 origin, float3 dir, float tMax, inout ui
     float t = tEnter;
     for (int i = 0; i < maxSteps && t < tExit; i++) {
         float3 p = origin + dir * t;
-        float sigmaBar = columnMajorant(p);
+        float sigmaBar = cloudColumnMajorant(p);
         if (sigmaBar <= 0.0) {
-            float jump = nextColumnDistance(p, dir, tExit);
+            float jump = cloudNextColumnDistance(p, dir, tExit);
             if (jump >= tExit - t) {
                 break; // this column never ends before the shell exit: nothing left to cross
             }
             t += jump;
             continue;
         }
-        float remaining = tExit - t;
         // Jittered stride: the deterministic lattice would freeze a quadrature bias into every
         // frame; the jitter turns it into noise DLSS-RR integrates out. A larger stride fraction
-        // takes fewer, longer strides over the same interval.
-        float dt = cloudShadowStride(tune.strideScale, remaining) * (0.75 + 0.5 * rndf(seed));
-        float sigmaT, sigmaC;
-        if (cloudSigma(p, sigmaT, sigmaC)) {
-            float sigmaR = max(sigmaT - sigmaC, 0.0);
-            float majorantR = max(sigmaBar - sigmaC, 1.0e-6);
-            transmittance *= exp(-sigmaC * dt) * (1.0 - saturate(sigmaR / majorantR));
+        // takes fewer, longer strides over the same interval. Clamped to the interval so the last
+        // stride ends exactly at the shell exit rather than overshooting it.
+        float dt = min(cloudShadowStride(tune, tExit - t) * (0.75 + 0.5 * rndf(seed)),
+                tExit - t);
+        float3 mid = origin + dir * (t + 0.5 * dt);
+        float sigmaT = cloudSigma(mid, tune);
+        if (sigmaT > 0.0) {
+            transmittance *= exp(-sigmaT * dt);
             if (transmittance < exitFloor) {
                 break; // remaining strides could not change this visibly
             }
@@ -296,7 +292,8 @@ public float3 cloudTransmittance(float3 origin, float3 dir, float tMax, inout ui
 float3 cloudSkyAmbient(float3 p, SkyState sky) {
     float bottom = worldPush.cloudLook1.x;
     float altitudeKm = worldPush.cloudLook0.w + (p.y - bottom) / 100.0;
-    float radiusKm = clamp(ATMOS_BOTTOM_KM + max(altitudeKm, MIN_VIEWER_ALTITUDE_KM),
+    // The clamp's lower bound already floors the altitude, so no separate max() is needed here.
+    float radiusKm = clamp(ATMOS_BOTTOM_KM + altitudeKm,
             ATMOS_BOTTOM_KM + MIN_VIEWER_ALTITUDE_KM, ATMOS_TOP_KM);
     float3 up = float3(0.0, 1.0, 0.0);
     float2 sunUv = skyViewLutUv(radiusKm, 1.0, lightViewCosine(up, sky.sunDir), SKY_VIEW_BODY_SUN);
@@ -312,14 +309,14 @@ float3 cloudSkyAmbient(float3 p, SkyState sky) {
  * bounces carry part of orders ≥ 2 themselves; charging the LUT everywhere would double-count
  * that fraction — the documented Tier S trade, research doc §7.2 "有限反弹 + LUT 兜底").
  *
- * The event's shadow ray is the most expensive single term (a full residual-ratio-tracking walk),
+ * The event's shadow ray is the most expensive single term (a full transmittance walk),
  * so the convergence axis decides how often it runs: at every event, only at each encounter's
  * first event, or never. The estimate is a Beer term on the same tau the MS LUT lookup uses, scaled
  * by an empirical half-slant factor so a dense interior lands near the exact walk's answer; the
  * LUT's ambient term already covers the higher-order fill, so the estimate only steers the direct
  * lobe.
  */
-public float3 cloudInscatter(float3 p, float3 rd, MieParams mie, SkyState sky,
+public float3 cloudInscatter(float3 p, float3 rd, MieParams mie, CloudTuning tune, SkyState sky,
                              bool firstEvent, inout uint seed) {
     float cosLight = dot(rd, celestialLight.dir);
     float phase = miePhaseEval(cosLight, mie);
@@ -327,36 +324,67 @@ public float3 cloudInscatter(float3 p, float3 rd, MieParams mie, SkyState sky,
     // A column estimate — the exact shadowing above carries the truth; this only steers the LUT.
     float top = worldPush.cloudLook1.y;
     float slant = max((top - p.y) / max(celestialLight.dir.y, 0.15), 0.0);
-    float sigmaT, sigmaC;
-    float tau = cloudSigma(p, sigmaT, sigmaC) ? sigmaT * slant : 0.0;
-    float2 lutUv = float2(saturate(cosLight * 0.5 + 0.5), saturate(tau / 32.0));
+    float sigmaT = cloudSigma(p, tune);
+    float tau = sigmaT * slant;
+    float2 lutUv = float2(saturate(cosLight * 0.5 + 0.5), saturate(tau / CLOUD_MS_LUT_TAU_MAX));
     float4 ms = cloudMultiScatterLut.SampleLevel(lutUv, 0.0);
 
-    bool exactShadow = cloudExactShadow(cloudTuning().eventShadow, firstEvent);
+    bool exactShadow = cloudExactShadow(tune.eventShadow, firstEvent);
     float3 shadowTerm = exactShadow
             ? cloudTransmittance(p + celestialLight.dir * 2.0, celestialLight.dir, 10000.0, seed)
             : exp(-tau * 0.35).xxx;
 
     float first = firstEvent ? 1.0 : 0.0;
     // Fluence → source: the LUT stores φ/(4π) per unit illuminance/radiance; the isotropic
-    // diffuse re-emission at this event scales by the local extinction σt.
+    // diffuse re-emission at this event scales by the local extinction σt. CLOUD_MS_STRENGTH is
+    // the LUT's calibration factor, so it scales only the two LUT terms — the order-1 NEE term
+    // above carries the exact phase and transmittance and stays outside that calibration.
     float3 luminance = celestialLight.illuminance * phase * shadowTerm;
-    luminance += celestialLight.illuminance * (ms.rgb * (sigmaT * first));
-    luminance += cloudSkyAmbient(p, sky) * (ms.a * (sigmaT * first));
-    return luminance * CLOUD_MS_STRENGTH;
+    luminance += CLOUD_MS_STRENGTH * celestialLight.illuminance * (ms.rgb * (sigmaT * first));
+    luminance += CLOUD_MS_STRENGTH * cloudSkyAmbient(p, sky) * (ms.a * (sigmaT * first));
+    return luminance;
 }
 
 // ---- Segment integration ------------------------------------------------------------------------
 
 /**
  * Outcome of integrating the cloud shell along one path segment.
- *   PASSTHROUGH — crossed without interaction; transmittance scales what the segment was
+ *   PASSTHROUGH — crossed without interaction; the segment's transmittance scales what it was
  *                 heading toward (surface hit or sky).
  *   SCATTERED   — a real interaction consumed the path inside the shell; resume the bounce loop
- *                 from segOrigin/segDir (one cloud event = one bounce-loop iteration).
+ *                 from the segment's segOrigin/segDir (one cloud event = one bounce-loop
+ *                 iteration).
  *   TERMINATED  — the path died inside the shell (bounce cap / roulette); nothing more to trace.
  */
 public enum CloudOutcome { PASSTHROUGH, SCATTERED, TERMINATED };
+
+// The mutable state a segment advances. Bundled so the caller's accumulators travel as one value
+// instead of four positional in/out parameters.
+public struct CloudPathState {
+    public float3 throughput;
+    public float3 luminance;
+    public uint seed;
+    public int bounceBudget;
+};
+
+// What one segment did. transmittance is meaningful only for PASSTHROUGH, segOrigin/segDir only
+// for SCATTERED.
+public struct CloudSegment {
+    public CloudOutcome outcome;
+    public float3 transmittance;
+    public float3 segOrigin;
+    public float3 segDir;
+};
+
+public CloudPathState cloudPathState(float3 throughput, float3 luminance, uint seed,
+                                     int bounceBudget) {
+    CloudPathState state;
+    state.throughput = throughput;
+    state.luminance = luminance;
+    state.seed = seed;
+    state.bounceBudget = bounceBudget;
+    return state;
+}
 
 /**
  * Weighted delta tracking through [tEnter, tExit] of the shell.
@@ -369,70 +397,74 @@ public enum CloudOutcome { PASSTHROUGH, SCATTERED, TERMINATED };
  * ambient, roulette, sample the next direction from the blended Mie phase, and hand the path
  * back to the bounce loop.
  *
- * `firstEvent` must be false when the caller is already continuing through the same cloud mass
- * (the previous segment ended in a cloud scatter) so the LUT is charged once per encounter.
- * `bounceBudget` is the caller's remaining bounce budget (in-only — the caller increments its own
- * loop counter on SCATTERED); cloud events consume it, so deep clouds cannot extend the whole
- * path for free.
+ * `continuingCloudMass` must be true when the caller is already inside the same cloud mass (the
+ * previous segment ended in a cloud scatter) so the LUT is charged once per encounter. The state's
+ * bounceBudget is the caller's remaining bounce budget (in-only — the caller increments its own
+ * loop counter on SCATTERED); cloud events consume it, so deep clouds cannot extend the whole path
+ * for free.
  */
-public CloudOutcome cloudIntegrate(float3 ro, float3 rd, float tMax, float tEnter, float tExit,
-                            bool firstEvent, inout float3 throughput, inout float3 luminance,
-                            inout uint seed, inout int bounceBudget,
-                            out float3 transmittance, out float3 segOrigin, out float3 segDir) {
-    transmittance = float3(1.0, 1.0, 1.0);
-    segOrigin = ro;
-    segDir = rd;
+public CloudSegment cloudIntegrate(float3 ro, float3 rd, float tEnter, float tExit,
+                                   bool continuingCloudMass, inout CloudPathState state) {
+    CloudSegment seg;
+    seg.outcome = CloudOutcome.PASSTHROUGH;
+    seg.transmittance = float3(1.0, 1.0, 1.0);
+    seg.segOrigin = ro;
+    seg.segDir = rd;
     SkyState sky = skyState(worldPush);
     MieParams mie = mieParams(CLOUD_DROPLET_UM);
-    bool msPending = firstEvent;
-    float t = tEnter;
     CloudTuning tune = cloudTuning();
-    int maxSteps = tune.pathSteps;
-    float exitFloor = tune.exitFloor;
+    // The MS LUT is charged at the encounter's first event only; a segment that begins inside the
+    // same mass has already spent that budget.
+    bool firstEvent = !continuingCloudMass;
+    float t = tEnter;
 
-    for (int step = 0; step < maxSteps; step++) {
+    for (int step = 0; step < tune.pathSteps; step++) {
         if (t >= tExit) {
             break;
         }
         float3 p = ro + rd * t;
-        float sigmaBar = columnMajorant(p);
+        float sigmaBar = cloudColumnMajorant(p);
         if (sigmaBar <= 0.0) {
-            float jump = nextColumnDistance(p, rd, tExit);
+            float jump = cloudNextColumnDistance(p, rd, tExit);
             if (jump >= tExit - t) {
                 break;
             }
             t += jump;
             continue;
         }
-        float s = -log(max(rndf(seed), 1.0e-7)) / sigmaBar;
+        float s = -log(max(rndf(state.seed), 1.0e-7)) / sigmaBar;
         float tNew = t + s;
         if (tNew >= tExit) {
             break; // sampled past the exit: ratio-tracking product stands, no tail factor
         }
         float3 q = ro + rd * tNew;
-        float sigmaT, sigmaC;
-        float sigma = cloudSigma(q, sigmaT, sigmaC) ? sigmaT : 0.0;
-        if (rndf(seed) < sigma / sigmaBar) {
+        float sigma = cloudSigma(q, tune);
+        if (rndf(state.seed) < sigma / sigmaBar) {
             // real scattering event
-            if (bounceBudget <= 0) {
-                return CloudOutcome.TERMINATED;
+            if (state.bounceBudget <= 0) {
+                seg.outcome = CloudOutcome.TERMINATED;
+                return seg;
             }
-            throughput *= CLOUD_ALBEDO;
-            luminance += throughput * cloudInscatter(q, rd, mie, sky, msPending, seed);
-            msPending = false;
+            state.throughput *= CLOUD_ALBEDO;
+            state.luminance += state.throughput
+                    * cloudInscatter(q, rd, mie, tune, sky, firstEvent, state.seed);
+            firstEvent = false;
             // Russian roulette on the cloud's own transport
-            float qRr = clamp(max(throughput.r, max(throughput.g, throughput.b)), 0.02, 1.0);
-            if (rndf(seed) > qRr) {
-                return CloudOutcome.TERMINATED;
+            float qRr = clamp(max(state.throughput.r, max(state.throughput.g, state.throughput.b)),
+                    0.02, 1.0);
+            if (rndf(state.seed) > qRr) {
+                seg.outcome = CloudOutcome.TERMINATED;
+                return seg;
             }
-            throughput /= qRr;
-            segOrigin = q;
-            segDir = sampleMieDirection(rd, mie, seed);
-            return CloudOutcome.SCATTERED;
+            state.throughput /= qRr;
+            seg.outcome = CloudOutcome.SCATTERED;
+            seg.segOrigin = q;
+            seg.segDir = sampleMieDirection(rd, mie, state.seed);
+            return seg;
         }
         // null collision: ratio-tracking weight and keep marching
-        transmittance *= 1.0 - sigma / sigmaBar;
-        if (transmittance.r < exitFloor) {
+        seg.transmittance *= 1.0 - sigma / sigmaBar;
+        if (seg.transmittance.r < tune.exitFloor) {
             // running product below the visibility floor: further strides could only darken it
             // by that fraction, and the path's remaining in-scatter is equally negligible.
             // Truncating biases thick interiors slightly transparent — the same production
@@ -441,8 +473,8 @@ public CloudOutcome cloudIntegrate(float3 ro, float3 rd, float tMax, float tEnte
         }
         t = tNew;
     }
-    transmittance = saturate(transmittance);
-    float passthrough = transmittance.r < 0.001 ? 0.0 : transmittance.r;
-    transmittance = passthrough.xxx;
-    return CloudOutcome.PASSTHROUGH;
+    seg.transmittance = saturate(seg.transmittance);
+    float passthrough = seg.transmittance.r < 0.001 ? 0.0 : seg.transmittance.r;
+    seg.transmittance = passthrough.xxx;
+    return seg;
 }
