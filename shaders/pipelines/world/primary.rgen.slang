@@ -5,6 +5,11 @@
 // stops; every later radiance trace belongs to Pass B. Deterministic guide probes may continue through
 // refraction, but Pass A does no NEE, RIS, SSS, or BSDF sampling.
 //
+// One dielectric interface is excepted: when the cloud shell lies on the camera -> face segment, this
+// pass hands the whole segment to Pass B instead of consuming the interface, because only Pass B can
+// shade that prefix with the shell's in-scattered light (it owns the radiance accumulator). See the
+// water/glass branch in tracePrimary.
+//
 // Perspective setup: invViewProj = inverse(proj * viewRot) maps clip to camera-relative world. Primary
 // rays are reconstructed from two unprojected points (near and far plane) rather than assuming the eye
 // is at the origin, because Minecraft bakes view bobbing into the projection, so the effective eye comes
@@ -20,6 +25,7 @@ import math;
 import medium;
 import segment;
 import water;
+import cloud;
 import trace;
 import guides;
 
@@ -96,8 +102,27 @@ public PathSegment tracePrimary(PathSegment seg,
             return terminal;
         }
 
-        // This hit is consumed in pass A, so carry its travelled-medium absorption and cone growth into
-        // the record for the next trace. The terminal hit above is deliberately not consumed here.
+        // Camera -> first water/glass face prefix. A cloud lying on this segment is shaded by
+        // cloudIntegrate, which returns the shell's in-scattered light as well as its transmittance —
+        // and this pass cannot run that walk: a PathSegment carries throughput only, so there is no
+        // radiance channel to put the in-scatter in. Multiplying the prefix by the transmittance alone
+        // would subtract the water/glass without ever painting the cloud over it, reading as a black
+        // hole wherever a cloud covers water or glass.
+        //
+        // So the interface is handed to Pass B whenever the shell lies on the prefix: Pass B re-traces
+        // the segment, integrates the shell with the full estimator (in-scatter included) and then
+        // consumes the interface with its own dielectric handler. The test is the shell slab, not the
+        // coverage — a pure function of the ray and the pushed shell — so ownership stays constant over
+        // a whole camera-altitude band instead of flipping pixel-by-pixel along a cloud edge, where a
+        // switch between the two interfaces' estimators would put a moving variance seam inside the
+        // cloud silhouette. Below the shell — the common case — no prefix reaches it, this pass keeps
+        // the hit, and the deterministic interface split below is used as before.
+        bool passBOwnsPrefix = bounce == 0 && cloudShellOnSegment(ro, rd, payload.hitT);
+
+        // When this pass keeps the hit it is consumed here, so carry its travelled-medium absorption and
+        // cone growth into the record for the next trace. When Pass B owns the segment instead, it
+        // re-traces it and repeats both from the untouched record. The terminal hit above is deliberately
+        // not consumed on either path.
         if (any(medium.current.extinction > 0.0)) {
             throughput *= exp(-medium.current.extinction * payload.hitT);
         }
@@ -158,6 +183,14 @@ public PathSegment tracePrimary(PathSegment seg,
                         !isWater && entering
                                 ? payloadAlbedo() : float3(1.0, 1.0, 1.0));
             }
+        }
+
+        // Pass B owns this interface: it re-traces the segment, integrates the shell on it (in-scatter
+        // included) and then consumes the interface with its own handler. The guide tuple written above
+        // is unaffected, because it is derived from this hit either way, so the denoiser sees one stable
+        // description of the pixel across the ownership change.
+        if (passBOwnsPrefix) {
+            return terminal;
         }
 
         // Split once, write both post-interface continuations, and stop Pass A radiance traversal.

@@ -408,7 +408,7 @@ flowchart TB
               <tr><th scope="row">cloudLook2</th><td><code>.y</code></td><td>侵蚀邻域 0 / 1 / 2</td><td><code>EROSION</code></td></tr>
               <tr><th scope="row">cloudLook2</th><td><code>.z</code></td><td>事件阴影精度 0 / 1 / 2</td><td><code>EVENT_SHADOW</code></td></tr>
               <tr><th scope="row">cloudLook2</th><td><code>.w</code></td><td>保留</td><td>0</td></tr>
-              <tr><th scope="row">cloudLook3</th><td><code>.x</code></td><td>主路径步数上限</td><td><code>PATH_STEPS</code></td></tr>
+              <tr><th scope="row">cloudLook3</th><td><code>.x</code></td><td>主路径步数（已含分辨率缩放与下限）</td><td><code>effectivePathSteps()</code></td></tr>
               <tr><th scope="row">cloudLook3</th><td><code>.y</code></td><td>阴影步数上限</td><td><code>SHADOW_STEPS</code></td></tr>
               <tr><th scope="row">cloudLook3</th><td><code>.z</code></td><td>阴影步长比例</td><td><code>STRIDE_SCALE</code></td></tr>
               <tr><th scope="row">cloudLook3</th><td><code>.w</code></td><td>透射率早退阈值</td><td><code>EXIT_FLOOR</code></td></tr>
@@ -909,7 +909,7 @@ throughput *= seg.transmittance;</code></pre>
 
         <div class="trade">
           <span class="tag">已知边角 · 代码中有注释</span>
-          <p>pass A 的电介质拆分（相机 → 首个水面或玻璃面）不会走第二处插入点，因此恰好跨过云的相机到水面这一段没有云衰减。这是一条很窄的路径（相机在云底之上、水面之下几乎不可能同时成立），作者标注为暂时接受。</p>
+          <p>pass A 会拆掉「相机 → 首个水面或玻璃面」这一段并消费这个界面，而 <code>PathSegment</code> 只传 throughput、没有辐射通道，所以它只能做衰减、无法补上云的散射光——单靠衰减会把水/玻璃压成黑洞，而不是把云画上去。做法是按<strong>壳层平板求交</strong>决定归属：前缀只要落在云壳上（即相机在壳底之上），pass A 就不消费该界面，把整段交给 pass B 重新追踪，由它做完整段积分（含散射光）之后再走自己的电介质处理；其余情况（相机在壳底之下，也就是常态）仍由 pass A 做确定性双分支拆分。判据是纯几何的，所以归属在整条相机高度带内恒定，不会沿云的边缘逐像素翻转。</p>
         </div>
 
         <h3>壳层求交</h3>

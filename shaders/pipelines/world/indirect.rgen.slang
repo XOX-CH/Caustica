@@ -74,11 +74,16 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
     // loop from the event point (one cloud event = one loop iteration). `inCloudMass` tracks whether
     // the path is still inside the same cloud mass so the MS LUT is charged once per encounter.
     bool inCloudMass = false;
-    // Pass B treats every hit it sees as one indirect-depth step, regardless of material or selected
-    // continuation lobe. Deliberately start at zero instead of seg.bounce: the first hit of either
-    // queued split branch is still the primary-terminal shading point. Hits 0 and 1 retain SSS; RIS
-    // remains active with its full configured candidate count at every hit. Pass A's primary/interface
-    // prefix is outside this SSS quality budget.
+    // Pass B treats every shading hit it sees as one indirect-depth step, regardless of material or
+    // selected continuation lobe. Deliberately start at zero instead of seg.bounce: the first hit of
+    // either queued split branch is still the primary-terminal shading point. Hits 0 and 1 retain SSS;
+    // RIS remains active with its full configured candidate count at every hit. Pass A's primary/
+    // interface prefix is outside this SSS quality budget.
+    //
+    // A dielectric face is not a shading point, so it never consumes a step. That only comes up for a
+    // bounce-0 water/glass face, which is the one interface Pass A can hand to this pass instead of
+    // splitting it itself (see primary.rgen); counting it would push the real first shading point one
+    // step deeper. Pass A's own split never reaches here, because it resumes at bounce+1.
     int indirectDepth = 0;
     for (int bounce = seg.bounce; bounce <= maxBounces; bounce++) {
         // Radiance SBT records run any-hit only for true alpha cutout. Translucent/water go straight to
@@ -146,9 +151,12 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
         // Cloud shell integration between surface hits, before the hit is consumed: a scattering
         // event inside the shell replaces the surface segment with a phase-sampled continuation
         // (god rays between clouds, cloud GI); a clean passthrough attenuates the radiance on its
-        // way to the surface. NOTE: segments consumed by pass A's dielectric split (camera ->
-        // first water/glass face) never retrace here, so a cloud crossed on exactly that prefix is
-        // not attenuated — a rare above-cloud-base-to-water path accepted for now.
+        // way to the surface.
+        //
+        // Scope: every segment this loop re-traces, which is every segment that matters — Pass A hands
+        // the camera -> first water/glass face prefix over to this pass whenever the shell lies on it
+        // (primary.rgen), so that prefix is integrated here too. The only segment Pass A keeps is one no
+        // prefix can reach the shell on, which leaves nothing here to integrate on it anyway.
         {
             float tEnter, tExit;
             if (cloudShellInterval(ro, rd, payload.hitT, tEnter, tExit)) {
@@ -184,7 +192,13 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
         float3 hitPos = ro + rd * payload.hitT;
         rayConeWidth = max(rayConeWidth + rayConeSpread * max(payload.hitT, 0.0), RAY_CONE_MIN_WIDTH);
         uint material = payloadMaterial();
-        int hitDepth = indirectDepth++;
+        bool isDielectricFace = material == MATERIAL_WATER || material == MATERIAL_DIELECTRIC;
+        // See the indirectDepth declaration: a dielectric face is a pass-through interface, not a
+        // shading point, so the bounce-0 face Pass A handed over must not consume a depth step.
+        int hitDepth = indirectDepth;
+        if (!(bounce == 0 && isDielectricFace)) {
+            indirectDepth++;
+        }
 
         // ---- Dielectric interface: water, stained glass, ice. ONE handler and one behaviour — every
         // dielectric is a volume. Fresnel from the relative index across the face, then reflect or
@@ -196,7 +210,7 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
         // for the caustic term. Which side of the face we are on comes from the geometry
         // (payloadDielectricEntering), so a stray or missing face cannot desync the medium for the rest
         // of the path.
-        if (material == MATERIAL_WATER || material == MATERIAL_DIELECTRIC) {
+        if (isDielectricFace) {
             // A dielectric has no local shading term. At the path cap its continuation cannot be traced,
             // so avoid computing an unused Fresnel choice, medium update, and roulette step.
             if (bounce >= maxBounces) {

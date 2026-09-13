@@ -45,6 +45,9 @@ public final class RtRayTracingOptions {
             cloudEnabled(),
             cloudShapeOctaves(),
             cloudErosion(),
+            cloudErosionStrength(),
+            cloudDetailStrength(),
+            cloudResolution(),
             cloudPathSteps(),
             cloudShadowSteps(),
             cloudStrideScale(),
@@ -120,12 +123,27 @@ public final class RtRayTracingOptions {
         return threeLevelOption("caustica.options.rt.cloudErosion", CausticaConfig.Rt.Cloud.EROSION);
     }
 
+    private static ResetableOption cloudErosionStrength() {
+        return hundredthsSlider("caustica.options.rt.cloudErosionStrength",
+                CausticaConfig.Rt.Cloud.EROSION_STRENGTH, 0, 100, 42);
+    }
+
+    private static ResetableOption cloudDetailStrength() {
+        return hundredthsSlider("caustica.options.rt.cloudDetailStrength",
+                CausticaConfig.Rt.Cloud.DETAIL_STRENGTH, 0, 100, 0);
+    }
+
+    private static ResetableOption cloudResolution() {
+        return hundredthsSlider("caustica.options.rt.cloudResolution",
+                CausticaConfig.Rt.Cloud.RESOLUTION, 25, 400, 100);
+    }
+
     private static ResetableOption cloudPathSteps() {
-        return intSlider("caustica.options.rt.cloudPathSteps", CausticaConfig.Rt.Cloud.PATH_STEPS, 4, 64, 24);
+        return intSlider("caustica.options.rt.cloudPathSteps", CausticaConfig.Rt.Cloud.PATH_STEPS, 4, 128, 24);
     }
 
     private static ResetableOption cloudShadowSteps() {
-        return intSlider("caustica.options.rt.cloudShadowSteps", CausticaConfig.Rt.Cloud.SHADOW_STEPS, 1, 48, 12);
+        return intSlider("caustica.options.rt.cloudShadowSteps", CausticaConfig.Rt.Cloud.SHADOW_STEPS, 1, 96, 24);
     }
 
     private static ResetableOption cloudStrideScale() {
@@ -133,7 +151,7 @@ public final class RtRayTracingOptions {
     }
 
     private static ResetableOption cloudExitFloor() {
-        return thousandthsSlider("caustica.options.rt.cloudExitFloor", CausticaConfig.Rt.Cloud.EXIT_FLOOR, 1, 200, 20);
+        return thousandthsSlider("caustica.options.rt.cloudExitFloor", CausticaConfig.Rt.Cloud.EXIT_FLOOR, 1, 200, 8);
     }
 
     private static ResetableOption cloudEventShadow() {

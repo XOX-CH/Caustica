@@ -123,6 +123,17 @@ public final class RtComposite {
     }
 
     private static final int WATER_ANCHOR_MASK = 4095;
+    // Weather tile period in XZ blocks; must match CLOUD_WEATHER_SPAN in shaders/pipelines/world/
+    // cloud_field.slang. Cloud-wind advection folds its integral into this window on the CPU.
+    private static final float CLOUD_WEATHER_SPAN = 8192.0f;
+    // The cloud anchor is the terrain rebase origin (blockX, blockZ) pushed UNFOLDED: reconstructing
+    // world XZ as p.xz + cloudOrigin must equal the true, continuously-advancing world coordinate so
+    // the cloud field stays welded to the terrain under ANY player movement. Folding to a window
+    // (e.g. 2^21 blocks) would keep the float small but breaks at the window's multiples for the
+    // APERIODIC shape/detail/erosion noise — the noise samples a shifted lattice at the wrap and the
+    // whole cloud teleports to a different pattern, exactly the long-walk "shape jump" reported on
+    // tile-periodic-wrapped weather never sees it (the cell/local reconstruction makes the wrap a
+    // null motion), but the aperiodic fBm has no such invariance, so the anchor must stay continuous.
     // The versioned look package owns every photometric anchor and the sky geometry. Its sun illuminance is the
     // photometric solar constant at the top of the atmosphere; the shader's transmittance LUT brings that
     // to ~117,000 lux under a zenith sun and reddens/dims it through sunset, and because world.rmiss tints
@@ -283,6 +294,16 @@ public final class RtComposite {
     private boolean mvHasPrev;
     private float previousWaterWaveTime;
     private boolean waterWaveTimeValid;
+    // Integrated cloud-wind displacement along the fixed wind direction, and the frame clock that
+    // accrues it. The integral (not windSpeed × time) is pushed each frame so a mid-session wind
+    // speed change re-scales the drift rate instead of snapping the whole sky to speed × time.
+    // This distance is MONOTONIC and never reset by any render-state event (world reload, RT toggle,
+    // window resize, DLSS/HDR invalidation, F3+A): it is welded to the JVM lifetime and only ever
+    // grows, so the cloud field can never jump back to an earlier registration. Its dt clock is the
+    // one mutable piece — re-armed to -1 on resource recreation so the next delta is remeasured
+    // cleanly (the length guard in the frame skips stale stalls either way).
+    private float cloudWindDistance;
+    private long cloudWindLastNanos = -1L;
     private long atlasSampler;
     private boolean failed;
     private boolean loggedActive;
@@ -992,6 +1013,11 @@ public final class RtComposite {
 
         mvHasPrev = false; // recreated images -> first MV frame is zero
         waterWaveTimeValid = false;
+        // Re-arm the cloud-wind delta clock exactly like the MV and water clocks: the accumulated
+        // distance itself is preserved (it is the welded, never-reset wind integral), only the dt it
+        // accrues with is remeasured from the first frame after recreation so a reconfigure can never
+        // telescope a huge delta into the pushed displacement.
+        cloudWindLastNanos = -1L;
         if (worldPipeline != null) {
             worldPipeline.setStorageImage(output.view);
             bindGuideImages();
@@ -1161,33 +1187,58 @@ public final class RtComposite {
             float cloudTopAltitudeKm = 8.0f;
             float cloudBaseRebased = (cloudSeaLevel + cloudBaseAltitudeKm * 100.0f) - terrain.blockY;
             float cloudTopRebased = (cloudSeaLevel + cloudTopAltitudeKm * 100.0f) - terrain.blockY;
-            // Monotonic seconds since the renderer started: no hourly modulo wrap. The wind offset
-            // grows as windSpeed × time, so an unbounded clock keeps flowing freely instead of
-            // teleporting every cloud windSpeed × 3600 blocks on the hour (float precision at a
-            // month's runtime stays well under one block of drift).
-            float cloudTime = (float) (System.nanoTime() / 1.0e9);
-            Float4 cloudLook0 = new Float4(cloudCoverage,
-                    CausticaConfig.Rt.Cloud.WIND_SPEED.value(), cloudTime, cloudBaseAltitudeKm);
+            long cloudTimeNanos = System.nanoTime();
+            // Cloud-wind displacement is integrated here, not reconstructed from windSpeed × time in
+            // the shader: the integral of speed·dt means a mid-session wind-speed change only re-scales
+            // how fast the sky drifts, leaving the field in place. weather takes the value folded into
+            // [0, CLOUD_WEATHER_SPAN) (the field is tile-periodic there, so the fold is lossless and the
+            // pushed value stays float-exact at any runtime or walk distance); shape scroll takes the
+            // same raw integral untouched, since its fBm is not tile-periodic. Driving both from one
+            // accrued scalar keeps the two wind uses coupled, so they cannot drift apart or teleport.
+            float cloudDt = cloudWindLastNanos >= 0 ? (float) ((cloudTimeNanos - cloudWindLastNanos) / 1.0e9) : 0f;
+            cloudWindLastNanos = cloudTimeNanos;
+            if (cloudDt > 0f && cloudDt <= 0.25f) {
+                cloudWindDistance += Math.max(CausticaConfig.Rt.Cloud.WIND_SPEED.value(), 0f) * cloudDt;
+            }
+            float cloudWindFolded = cloudWindDistance % CLOUD_WEATHER_SPAN;
+            Float4 cloudLook0 = new Float4(cloudCoverage, cloudWindFolded, cloudWindDistance, cloudBaseAltitudeKm);
             Float4 cloudLook1 = new Float4(cloudBaseRebased, cloudTopRebased,
                     CausticaConfig.Rt.Cloud.DENSITY.value(),
                     CausticaConfig.Rt.Cloud.ENABLED.value() ? 1.0f : 0.0f);
-            // cloudLook2 carries the shape knobs and the event-shadow mode, cloudLook3 the estimator
-            // budgets; the shader resolves every parameter independently.
+            // cloudLook2 carries the shape knobs, the event-shadow mode and the detail strength,
+            // cloudLook3 the estimator budgets; the shader resolves every parameter independently.
             Float4 cloudLook2 = new Float4(
                     (float) CausticaConfig.Rt.Cloud.SHAPE_OCTAVES.value(),
                     (float) CausticaConfig.Rt.Cloud.EROSION.value(),
-                    (float) CausticaConfig.Rt.Cloud.EVENT_SHADOW.value(), 0.0f);
+                    (float) CausticaConfig.Rt.Cloud.EVENT_SHADOW.value(),
+                    CausticaConfig.Rt.Cloud.DETAIL_STRENGTH.value());
             Float4 cloudLook3 = new Float4(
-                    (float) CausticaConfig.Rt.Cloud.PATH_STEPS.value(),
+                    // Absolute primary stride count: CausticaConfig resolves the step cap and the
+                    // render-resolution multiplier — including the floor that keeps the walk a
+                    // quadrature when the two sliders cancel out. The shader only ever reads the
+                    // resolved count, so it never sees the two knobs separately.
+                    (float) CausticaConfig.Rt.Cloud.effectivePathSteps(),
                     (float) CausticaConfig.Rt.Cloud.SHADOW_STEPS.value(),
                     CausticaConfig.Rt.Cloud.STRIDE_SCALE.value(),
                     CausticaConfig.Rt.Cloud.EXIT_FLOOR.value());
 
-            // World-stable cloud anchor: the terrain rebase origin (blockX, blockZ). Every ray origin
-            // is rebased by this value, so the shader re-adds it (cloudWorldXz) to keep the weather,
-            // macrogrid and shape/detail noise pinned to the world instead of drifting with each
-            // rebase. Matches WATER_ANCHOR_MASK's role for waves.
-            Float4 cloudOrigin = new Float4(terrain.blockX, terrain.blockZ, 0f, 0f);
+            // World-stable cloud anchor: the terrain rebase origin (blockX, blockY, blockZ), pushed
+            // unfolded. Every ray origin is rebased by this value, so the shader re-adds it
+            // (cloudWorldXz / cloudWorldY) to keep the weather, macrogrid and shape/detail/erosion noise
+            // pinned to the world instead of drifting with each rebase. Y is part of the anchor for the
+            // same reason as XZ, and it is the axis a rebase moves most freely: the rebase origin Y is
+            // the player's own block Y, so it tracks terrain height and altitude. It is deliberately NOT
+            // wrapped to a window: a wrapped (periodic) anchor is a null motion for the weather/macrogrid
+            // fields (their cell/local UV reconstruction survives any magnitude), but for the APERIODIC
+            // shape fBm a wrap would sample a shifted lattice and teleport the cloud shape every 2^21
+            // blocks of world travel. Keeping the raw origin makes the reconstruction equal the true
+            // world coordinate, so a walk of any length (and each rebase) leaves the cloud field exactly
+            // in place. z rides the erosion-strength knob.
+            Float4 cloudOrigin = new Float4(
+                    (float) terrain.blockX,
+                    (float) terrain.blockZ,
+                    CausticaConfig.Rt.Cloud.EROSION_STRENGTH.value(),
+                    (float) terrain.blockY);
             new WorldPushData(
                     frameInvViewProj,
                     new Float3((float) (camX - terrain.blockX), (float) (camY - terrain.blockY),
