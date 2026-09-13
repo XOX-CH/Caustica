@@ -57,6 +57,7 @@ import cloud_field;
 public struct CloudTuning {
     public int shapeOctaves;  // fBm octaves of the shape field
     public int erosion;       // 0 = none, 1 = 8-cell Worley, 2 = 27-cell Worley
+    public float erosionStrength; // 0..1 carve amount of the Worley field (0 = none)
     public int eventShadow;   // 0 = Beer everywhere, 1 = exact at the first event, 2 = exact everywhere
     public int pathSteps;     // strides per shell crossing of the primary walk (renormalised to
                               // always span the interval — cost is linear, density- and
@@ -70,6 +71,7 @@ public CloudTuning cloudTuning() {
     CloudTuning t;
     t.shapeOctaves = clamp(int(round(worldPush.cloudLook2.x)), 1, 8);
     t.erosion = clamp(int(round(worldPush.cloudLook2.y)), 0, 2);
+    t.erosionStrength = clamp(worldPush.cloudOrigin.z, 0.0, 1.0);
     t.eventShadow = clamp(int(round(worldPush.cloudLook2.z)), 0, 2);
     t.pathSteps = clamp(int(round(worldPush.cloudLook3.x)), 1, 512);
     t.shadowSteps = clamp(int(round(worldPush.cloudLook3.y)), 1, 512);
@@ -95,29 +97,60 @@ public bool cloudExactShadow(int eventShadow, bool firstEvent) {
 // ---- World anchor --------------------------------------------------------------------------------
 //
 // Every ray origin and terrain instance transform is rebased so the player sits near the float
-// origin, and the rebase origin (worldPush.cloudOrigin.xy = (blockX, blockZ)) moves each time the
-// terrain rebuilds. A rebased coordinate is therefore NOT world-stable: without compensation the
-// whole cloud field would shift with the origin. Reconstruct the world XZ here for every domain
-// that must stay pinned to the world — the weather texture, the macrogrid, the shape/detail noise
-// and the column crossing test. Only the horizontal axes are re-anchored; Y stays rebased relative
-// to the (equally rebased) pushed shell, which keeps the noise-domain magnitudes small and precise.
+// origin, and the rebase origin (worldPush.cloudOrigin.x/.y/.w = the player's block X/Z/Y at the
+// last terrain rebuild) moves each time the terrain rebuilds. A rebased coordinate is therefore
+// NOT world-stable: without compensation the whole cloud field would shift with the origin.
+// Reconstruct the world position here for every domain that must stay pinned to the world — the
+// weather texture, the macrogrid, the shape/detail noise and the column crossing test.
+//
+// Y is re-anchored like XZ, and it is the axis that matters most in practice: the rebase origin Y
+// is the player's own block Y, so a rebuild snaps it to wherever the player now stands. A vertical
+// shift of the origin moves the aperiodic shape fBm along its Y axis (the whole cloud pattern
+// translates up or down in the shell, and re-rolls wherever the lattice cell index changes) and
+// re-seeds the erosion lattice outright — its cell is 15 blocks, so a modest altitude change lands
+// on a different Worley cell and the wispy detail changes wholesale. Only the reconstructed world
+// coordinate keeps both lattices sampled at the same place before and after any rebase.
+//
+// cloudOrigin is the UNFOLDED rebase origin, so the reconstruction equals the true world coordinate
+// and stays continuous across every rebase and over any walk distance. A periodic wrap of this
+// anchor is deliberately avoided — weather is tile-periodic and survives a wrap through its
+// cell/local UV, but a wrap of the aperiodic shape noise would sample a shifted lattice and
+// teleport the cloud shape, so the anchor must never be wrapped.
+//
+// Magnitudes differ per axis: world XZ can reach millions of blocks (hence cloudWeatherUv's
+// cell/local split), but the vertical noise input is only ever sampled inside the shell, so its
+// world value stays within a few hundred blocks and needs no split.
 public float2 cloudWorldXz(float3 p) {
     return p.xz + worldPush.cloudOrigin.xy;
+}
+
+public float cloudWorldY(float yRebased) {
+    return yRebased + worldPush.cloudOrigin.w;
 }
 
 // ---- Density field ------------------------------------------------------------------------------
 
 // The weather tile's UV for a world position: one wrapping CLOUD_WEATHER_SPAN tile across XZ. The
 // weather map and the macrogrid are both indexed by it, so the wrap lives here once.
+//
+// The rebase origin (cloudOrigin) can sit millions of blocks from the float origin. Summing it with
+// the rebased p.xz and THEN dividing by SPAN would drop the low bits of p.xz (weeks of accumulated
+// position become a rounding error), and near a tile boundary a crossed cell would jump the wrap back
+// to the far side of the tile — the two half-texel-seam classes of the A2 anchor fix. Reconstruct the
+// wrap cell/local (floor→cell, subtract→[0,SPAN) local) so no large intermediate is ever formed.
 public float2 cloudWeatherUv(float3 p) {
-    return frac(cloudWorldXz(p) / CLOUD_WEATHER_SPAN);
+    float2 world = cloudWorldXz(p);
+    float2 cell = floor(world / CLOUD_WEATHER_SPAN);
+    float2 local = world - cell * CLOUD_WEATHER_SPAN; // ∈ [0, SPAN) regardless of sign or magnitude
+    return local / CLOUD_WEATHER_SPAN;
 }
 
 // Weather lookup: the bake already advected and biased the field (weatherCoverageField in
 // cloud_field), so the runtime lookup is a plain wrap.
-// R = coverage 0..1, G = cloud type 0..1 (0 = stratus .. 1 = cumulus).
-public float2 sampleWeather(float3 p) {
-    return cloudWeatherTex.SampleLevel(cloudWeatherUv(p), 0.0).rg;
+// R = coverage 0..1, G = cloud type 0..1 (0 = stratus .. 1 = cumulus), B = vertical relief 0..1
+// (~0.5 is the neutral shell, so the mapped lift is zero at mid-field).
+public float3 sampleWeather(float3 p) {
+    return cloudWeatherTex.SampleLevel(cloudWeatherUv(p), 0.0).rgb;
 }
 
 // Empty-column gate for hop skipping: the baked per-cell max coverage answers whether the column
@@ -137,14 +170,15 @@ public float cloudSigma(float3 p, CloudTuning tune) {
     if (p.y < bottom || p.y > top) {
         return 0.0;
     }
-    float2 weather = sampleWeather(p);
+    float3 weather = sampleWeather(p);
     float coverage = weather.r;
     if (coverage <= 0.003) {
         return 0.0;
     }
     float type = weather.g;
+    float lift = weather.b;
     float hf = (p.y - bottom) / max(top - bottom, 1.0);
-    float profile = heightProfile(hf, type);
+    float profile = heightProfile(hf, type, lift);
     if (profile <= 0.003) {
         return 0.0;
     }
@@ -156,16 +190,42 @@ public float cloudSigma(float3 p, CloudTuning tune) {
     // clouds exist; peak density inside a cloud is independent of coverage, which is why the
     // macrogrid majorant is the global CLOUD_MAX_SIGMA × sigmaScale(k) for any covered column.
     // The power morph and the ramp never exceed 1, so that bound holds at every knob position.
-    float3 sp = float3(cloudWorldXz(p) * CLOUD_SHAPE_FREQ, p.y * CLOUD_SHAPE_FREQ);
-    float2 wo = cloudWindOffset(worldPush.cloudLook0.yz);
-    float shape = fbm3(sp + float3(wo.x, 0.0, wo.y) * CLOUD_SHAPE_FREQ, tune.shapeOctaves);
+    float3 sp = float3(cloudWorldXz(p) * CLOUD_SHAPE_FREQ, cloudWorldY(p.y) * CLOUD_SHAPE_FREQ);
+    // Shape advects with the RAW integrated wind shaft (cloud_field's cloudWindShaft, cloudLook0.z):
+    // the shape fBm is aperiodic, so the weather offset's SPAN-fold would teleport it. It shares the
+    // same accrued distance as the folded weather offset, so the fine structure tracks the broad
+    // coverage mask under wind and a wind-speed change re-scales both drift rates together.
+    float2 shaft = cloudWindShaft(worldPush.cloudLook0.z);
+    float3 windShear = float3(shaft.x, 0.0, shaft.y) * CLOUD_SHAPE_FREQ;
+    float shape = fbm3(sp + windShear, tune.shapeOctaves);
     float density = pow(cloudRemap(shape * profile, 1.0 - coverage, 1.0), cloudDensityShapePow(k));
     density *= lerp(cloudDensityLwcBase(k), 1.0, hf);
     if (density > 0.0 && tune.erosion >= 1) {
         float2 eolXz = cloudWorldXz(p) * CLOUD_EROSION_FREQ;
-        float3 ep = float3(eolXz.x + worldPush.cloudLook0.z * 0.01, p.y * CLOUD_EROSION_FREQ, eolXz.y);
+        // Erosion advects with the SAME raw wind shaft as the shape field (frequency-scaled), so its
+        // wispy detail tracks the cloud body under wind instead of drifting on an unbounded session
+        // clock: a raw-time offset would scroll even at zero wind and grow with uptime, self-boiling
+        // wisps long after the wind died. Static at zero wind, coherent with shape otherwise.
+        float2 windShearE = shaft * CLOUD_EROSION_FREQ;
+        float3 ep = float3(eolXz.x + windShearE.x, cloudWorldY(p.y) * CLOUD_EROSION_FREQ,
+                eolXz.y + windShearE.y);
         float erosion = tune.erosion >= 2 ? worley3x27(ep) : worley3x8(ep);
-        density = cloudRemap(density, erosion * CLOUD_EROSION_STRENGTH * (1.0 - density), 1.0);
+        density = cloudRemap(density, erosion * tune.erosionStrength * (1.0 - density), 1.0);
+    }
+
+    // C1 detail: an optional high-frequency octave carved into the eroded density, evaluated IN
+    // SHAPE SPACE (the same shaft carries the wind offset's shear, so the detail advects with the
+    // cloud body instead of crawling against it) and faded out past a viewer distance so it cannot
+    // alias into shimmer far away. The carve is scaled to stay ∈ [0.55, 1.0] — detail only erodes,
+    // never densifies — which preserves the macrogrid majorant bound for the tuned σt ceiling, so a
+    // non-zero detail strength cannot push-density past what the empty-space skip expected. Default
+    // strength 0 leaves the reference look untouched.
+    float detail = clamp(worldPush.cloudLook2.w, 0.0, 1.0);
+    if (detail > 0.0) {
+        float lod = saturate(1.0 - length(p - worldPush.camOffset) * (1.0 / 14000.0));
+        float3 detailP = (sp + windShear) * float3(2.6, 1.7, 2.6);
+        float det = fbm3(detailP, 1); // single octave: near-parity with fbm3 up close at half the cost
+        density *= 1.0 - (0.45 * (1.0 - det)) * detail * lod;
     }
     return density * CLOUD_MAX_SIGMA * cloudDensitySigmaScale(k);
 }
@@ -260,6 +320,18 @@ public float3 cloudTransmittance(float3 origin, float3 dir, float tMax, inout ui
     float exitFloor = tune.exitFloor;
     float transmittance = 1.0;
     float t = tEnter;
+    // B3: jitter the quadrature LATTICE start (not just the per-stride lengths) by up to one stride,
+    // so the shadow estimate's placement decorrelates frame-to-frame and DLSS-RR integrates the
+    // residual like any other estimator noise. Capped below a stride so it can never overshoot a
+    // column boundary into a hop it was not meant to take, AND to a quarter of the shell interval:
+    // a near or thin cloud has a short tExit - tEnter that fits only a couple of strides, so an
+    // uncapped offset would park those few samples at random positions within the slice every frame
+    // — with the camera closing in, RR's reprojection cannot settle it and the cloud shimmers
+    // randomly. Far clouds have a large interval, so the quarter-interval bound stays above the
+    // half-stride cap and decorrelation is unchanged there.
+    float jitterMax = min(cloudShadowStride(tune, tExit - tEnter) * 0.5,
+            (tExit - tEnter) * 0.25);
+    t += rndf(seed) * jitterMax;
     for (int i = 0; i < maxSteps && t < tExit; i++) {
         float3 p = origin + dir * t;
         if (!cloudColumnCovered(p)) {
@@ -304,7 +376,15 @@ float3 cloudSkyAmbient(float3 p, SkyState sky) {
     float3 up = float3(0.0, 1.0, 0.0);
     float2 sunUv = skyViewLutUv(radiusKm, 1.0, lightViewCosine(up, sky.sunDir), SKY_VIEW_BODY_SUN);
     float2 moonUv = skyViewLutUv(radiusKm, 1.0, lightViewCosine(up, sky.moonDir), SKY_VIEW_BODY_MOON);
-    return skyViewLut.SampleLevel(sunUv, 0.0).rgb + skyViewLut.SampleLevel(moonUv, 0.0).rgb;
+    float3 dome = skyViewLut.SampleLevel(sunUv, 0.0).rgb + skyViewLut.SampleLevel(moonUv, 0.0).rgb;
+    // B4: the sky-view LUT carries only the bodies' scattering, so on a moonless night it reads ~0 and
+    // a cloud would go darker than the airglow the camera sees silhouetted against it. Airglow peaks at
+    // the oxygen 557.7 nm (green) and 630 nm (red) lines — tint it green/red rather than grey — and
+    // unresolved starlight adds a neutral floor. Both are isotropic (emitted by the atmosphere itself,
+    // not scattered from a body), matching the two floors the miss shader adds to the sky it draws.
+    float3 airglow = sky.airglowLuminance * float3(1.10, 1.00, 0.74);
+    float3 starFloor = float3(sky.starLuminance * 0.35);
+    return dome + airglow + starFloor;
 }
 
 /**
@@ -335,18 +415,39 @@ public float3 cloudInscatter(float3 p, float3 rd, MieParams mie, CloudTuning tun
     float2 lutUv = float2(saturate(cosLight * 0.5 + 0.5), saturate(tau / CLOUD_MS_LUT_TAU_MAX));
     float4 ms = cloudMultiScatterLut.SampleLevel(lutUv, 0.0);
 
+    // B1: the dominant light reaching THIS cloud point has passed through the atmosphere down to the
+    // cloud's altitude, not down to the viewer. A high cloud — or one grazing the horizon — intercepts
+    // a shorter and differently-tinted (ozone-stained) path than the ground. The LUT already folded the
+    // viewer's path into celestialLight.illuminance, so shift it to this point by the ratio of
+    // cloud-to-space over viewer-to-space transmittance toward the light; the ozone reddening and
+    // low-sun extinction fall out per channel. Sampled at the event (events are sparse — a handful per
+    // cloud crossing) rather than stepped, so no dedicated cloud sub-LUT is warranted.
+    float cloudAltitudeKm = worldPush.cloudLook0.w + (p.y - worldPush.cloudLook1.x) / 100.0;
+    float cloudRadiusKm = clamp(ATMOS_BOTTOM_KM + cloudAltitudeKm,
+            ATMOS_BOTTOM_KM + MIN_VIEWER_ALTITUDE_KM, ATMOS_TOP_KM);
+    float3 cloudToSpace = sampleTransmittance(transmittanceLut, cloudRadiusKm, celestialLight.dir.y);
+    float3 viewerToSpace = sampleTransmittance(transmittanceLut, sky.viewerRadiusKm, celestialLight.dir.y);
+    float3 atmo = clamp(cloudToSpace / max(viewerToSpace, float3(1.0e-6)), 0.0, 8.0);
+
     bool exactShadow = cloudExactShadow(tune.eventShadow, firstEvent);
+    // B3 (order-1 estimate only): the Beer shadow must undercut pure self-opacity by the multiple
+    // scattering the MS LUT supplies above order 1 — higher-order light bleeds AROUND the direct lobe,
+    // so the direct term's penetration rises toward the horizon, where slant optical paths are long and
+    // multi-scatter dominates. A light-zenith-linear coefficient replaces the old fixed 0.35.
+    float kBeer = lerp(0.18, 0.42, saturate(0.5 + 0.5 * celestialLight.dir.y));
     float3 shadowTerm = exactShadow
             ? cloudTransmittance(p + celestialLight.dir * 2.0, celestialLight.dir, 10000.0, seed)
-            : exp(-tau * 0.35).xxx;
+            : exp(-tau * kBeer).xxx;
 
     float first = firstEvent ? 1.0 : 0.0;
     // Fluence → source: the LUT stores φ/(4π) per unit illuminance/radiance; the isotropic
     // diffuse re-emission at this event scales by the local extinction σt. CLOUD_MS_STRENGTH is
     // the LUT's calibration factor, so it scales only the two LUT terms — the order-1 NEE term
-    // above carries the exact phase and transmittance and stays outside that calibration.
-    float3 luminance = celestialLight.illuminance * phase * shadowTerm;
-    luminance += CLOUD_MS_STRENGTH * celestialLight.illuminance * (ms.rgb * (sigmaT * first));
+    // above carries the exact phase and transmittance and stays outside that calibration. The
+    // altitude-shift `atmo` scales the sun contribution (order-1 and MS sun fluence alike) but not
+    // the sky-ambient term, whose radiance is already altitude-sampled in cloudSkyAmbient.
+    float3 luminance = celestialLight.illuminance * atmo * phase * shadowTerm;
+    luminance += CLOUD_MS_STRENGTH * celestialLight.illuminance * atmo * (ms.rgb * (sigmaT * first));
     luminance += CLOUD_MS_STRENGTH * cloudSkyAmbient(p, sky) * (ms.a * (sigmaT * first));
     return luminance;
 }

@@ -21,7 +21,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
         return;
     }
     WorldPush push = ConstPtr<WorldPush>(pcAddr.worldPushAddr)[0];
-    float2 windOffset = cloudWindOffset(push.cloudLook0.yz);
+    float2 windOffset = cloudWindOffset(push.cloudLook0.y);
     float bias = saturate(push.cloudLook0.x);
     float maxCoverage = 0.0;
     for (int y = 0; y < WEATHER_TEXELS_PER_CELL; y++) {

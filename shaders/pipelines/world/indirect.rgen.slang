@@ -146,9 +146,15 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
         // Cloud shell integration between surface hits, before the hit is consumed: a scattering
         // event inside the shell replaces the surface segment with a phase-sampled continuation
         // (god rays between clouds, cloud GI); a clean passthrough attenuates the radiance on its
-        // way to the surface. NOTE: segments consumed by pass A's dielectric split (camera ->
-        // first water/glass face) never retrace here, so a cloud crossed on exactly that prefix is
-        // not attenuated — a rare above-cloud-base-to-water path accepted for now.
+        // way to the surface.
+        //
+        // Scope: this covers every segment this loop re-traces, which is every segment except the
+        // camera -> first water/glass face prefix. Pass A consumes that interface, and a
+        // PathSegment carries throughput only (no radiance channel; this function starts at L = 0),
+        // so Pass A can attenuate that prefix but can never add the in-scattered light it collects.
+        // An occluded water/glass pixel therefore loses its own radiance without gaining the
+        // cloud's: anything that needs the prefix shaded by the cloud has to be ruled by Pass A's
+        // own cloudTransmittance multiply (primary.rgen), which is extinction-only.
         {
             float tEnter, tExit;
             if (cloudShellInterval(ro, rd, payload.hitT, tEnter, tExit)) {

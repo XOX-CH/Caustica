@@ -20,9 +20,10 @@ void main(uint3 tid : SV_DispatchThreadID) {
         return;
     }
     WorldPush push = ConstPtr<WorldPush>(pcAddr.worldPushAddr)[0];
-    float2 windOffset = cloudWindOffset(push.cloudLook0.yz);
+    float2 windOffset = cloudWindOffset(push.cloudLook0.y);
     float2 uv = (float2(tid.xy) + 0.5) / float(WEATHER_SIZE);
     float coverage = weatherCoverageField(uv, saturate(push.cloudLook0.x), windOffset);
     float type = weatherTypeField(uv, windOffset);
-    weatherImage[tid.xy] = float4(coverage, type, 0.0, 1.0);
+    float lift = weatherHeightLiftField(uv, windOffset); // B channel → heightProfile relief
+    weatherImage[tid.xy] = float4(coverage, type, lift, 1.0);
 }

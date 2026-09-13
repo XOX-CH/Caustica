@@ -20,6 +20,7 @@ import math;
 import medium;
 import segment;
 import water;
+import cloud;
 import trace;
 import guides;
 
@@ -94,6 +95,17 @@ public PathSegment tracePrimary(PathSegment seg,
             }
 
             return terminal;
+        }
+
+        // Cloud occlusion on the camera -> first water/glass face prefix. A dielectric has no sun NEE,
+        // so the only thing that lets a cloud shadow it is attenuating the light that reached the face.
+        // Pass B (indirect) integrates the cloud on every segment it re-traces, but this prefix is
+        // consumed here and never re-traced, so a cloud crossed on exactly it would otherwise be ignored
+        // and the water/glass would read brighter than its cover. cloudTransmittance returns identity when
+        // the shell does not lie on the prefix, so below-cloud views (the common case) are untouched and
+        // the multiply is unconditional — the volume occludes any surface that actually sits under it.
+        if (bounce == 0) {
+            throughput *= cloudTransmittance(ro, rd, payload.hitT, seed);
         }
 
         // This hit is consumed in pass A, so carry its travelled-medium absorption and cone growth into

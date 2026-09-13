@@ -63,7 +63,8 @@ public final class CausticaConfig {
             Rt.Reflex.ENABLED, Rt.Bloom.STRENGTH, Rt.Exposure.MODE, Rt.Tonemap.GAMMA, Rt.Tonemap.HUE_SHIFT,
             Rt.Tonemap.SATURATION, Rt.Lighting.SUN_COLOR_TEMP, Rt.Lighting.NIGHT_BRIGHTNESS, Rt.FrameStats.ENABLED,
             Rt.Screenshots.EXR_ENABLED, Rt.Hdr.ENABLED, Ngx.PATH,
-            Rt.Cloud.ENABLED, Rt.Cloud.SHAPE_OCTAVES, Rt.Cloud.EROSION, Rt.Cloud.PATH_STEPS,
+            Rt.Cloud.ENABLED, Rt.Cloud.SHAPE_OCTAVES, Rt.Cloud.EROSION, Rt.Cloud.EROSION_STRENGTH,
+            Rt.Cloud.DETAIL_STRENGTH, Rt.Cloud.PATH_STEPS,
             Rt.Cloud.SHADOW_STEPS, Rt.Cloud.STRIDE_SCALE, Rt.Cloud.EXIT_FLOOR, Rt.Cloud.EVENT_SHADOW,
             Rt.Cloud.COVERAGE, Rt.Cloud.DENSITY, Rt.Cloud.WIND_SPEED,
             CausticaConfig.Rt.Water.WAVE_STRENGTH,
@@ -693,6 +694,18 @@ public final class CausticaConfig {
             // evaluation, making this the largest per-sample cost knob.
             public static final IntSetting EROSION =
                     clampedInt("caustica.rt.cloudErosion", "cloud.erosion", 1, 0, 2);
+            // Carve amount of the Worley erosion field, 0..1. Scales how much of each density value
+            // the noise erodes (0 leaves it untouched, 1 carves by the full field). Independent of
+            // the neighbourhood selection EROSION above; the reference value is 0.42.
+            public static final FloatSetting EROSION_STRENGTH =
+                    clampedFloat("caustica.rt.cloudErosionStrength", "cloud.erosion-strength",
+                            0.42f, 0.0f, 1.0f);
+            // Optional high-frequency detail carved into the eroded density (cloud.slang, C1).
+            // Evaluated in shape space so it advects with the cloud body, and faded out with viewer
+            // distance to avoid far-field shimmer. 0 = off (the reference look); cost scales with
+            // the value because each density sample adds one noise octave.
+            public static final FloatSetting DETAIL_STRENGTH =
+                    clampedFloat("caustica.rt.cloudDetailStrength", "cloud.detail-strength", 0.0f, 0.0f, 1.0f);
             // Estimator parameters. These change sampling variance and the thick-core truncation
             // only, so their error arrives as per-frame noise the temporal denoiser integrates away.
             //
@@ -701,18 +714,30 @@ public final class CausticaConfig {
             // cost is linear and independent of density and crossing length, and more strides
             // buy quadrature accuracy (cleaner thick-core edges), not reach.
             public static final IntSetting PATH_STEPS =
-                    clampedInt("caustica.rt.cloudPathSteps", "cloud.path-steps", 24, 4, 64);
+                    clampedInt("caustica.rt.cloudPathSteps", "cloud.path-steps", 24, 4, 128);
+            // Master volumetric-cloud render-resolution multiplier (0.25-4x, 1.0 = native). It scales
+            // the primary free-flight stride budget, i.e. how finely the volume is path-sampled per
+            // shell crossing: more resolution = more, smaller strides across the same slab (smoother
+            // silhouettes and cleaner cores, linear cost), less = coarser/faster. Applied on the CPU
+            // to the effective step count pushed in cloudLook3.x; the individual step sliders stay
+            // the absolute base that 100% reproduces.
+            public static final FloatSetting RESOLUTION =
+                    clampedFloat("caustica.rt.cloudResolution", "cloud.render-resolution", 1.0f, 0.25f, 4.0f);
             // Strides per shadow transmittance walk, and the stride length as a fraction of the
             // remaining interval. The stride clamp window scales with the fraction, so that single
-            // number sets both the stride size and its bounds.
+            // number sets both the stride size and its bounds. Higher counts carve the umbrella
+            // (umbra) of terrain cloud shadows deeper and their edges cleaner on the long
+            // ground-to-shell light paths; a coarse count skips density cores and reads flat.
             public static final IntSetting SHADOW_STEPS =
-                    clampedInt("caustica.rt.cloudShadowSteps", "cloud.shadow-steps", 12, 1, 48);
+                    clampedInt("caustica.rt.cloudShadowSteps", "cloud.shadow-steps", 24, 1, 96);
             public static final FloatSetting STRIDE_SCALE =
                     clampedFloat("caustica.rt.cloudStrideScale", "cloud.stride-scale", 0.4f, 0.1f, 1.0f);
             // Running-product floor that ends a shadow transmittance walk early. Higher is cheaper
-            // and lets very thick cores drift slightly transparent.
+            // and lets very thick cores drift slightly transparent. The lower default keeps thick
+            // cloud cores (the heart of a terrain shadow) occluding down to ~0.8% transmittance
+            // instead of cutting off at 2% and letting an unnaturally bright leak peek through.
             public static final FloatSetting EXIT_FLOOR =
-                    clampedFloat("caustica.rt.cloudExitFloor", "cloud.exit-floor", 0.02f, 0.001f, 0.2f);
+                    clampedFloat("caustica.rt.cloudExitFloor", "cloud.exit-floor", 0.008f, 0.001f, 0.2f);
             // Event-shadow precision: 0 = Beer on the local tau everywhere, 1 = exact transmittance
             // walk at each encounter's first event, 2 = exact everywhere.
             public static final IntSetting EVENT_SHADOW =

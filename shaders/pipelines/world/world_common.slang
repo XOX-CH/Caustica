@@ -76,7 +76,8 @@ public struct WorldPush {
     public float4   skyLook4;
     // Volumetric cloud state (see cloud.slang):
     //   cloudLook0: x weather coverage bias (config baseline + MC rain, folded on the CPU),
-    //               y wind speed (blocks/s), z cloud time (s), w shell base altitude (km).
+    //               y integrated wind displacement folded to [0, CLOUD_WEATHER_SPAN) (weather
+    //               advection), z the same integral raw (shape scroll), w shell base altitude (km).
     //   cloudLook1: x shell bottom Y (rebased blocks), y shell top Y (rebased blocks),
     //               z perceived density k (0..1; extinction, shape fullness and the LWC ramp
     //               all derive from it in cloud_field.slang), w enabled (0/1).
@@ -91,7 +92,12 @@ public struct WorldPush {
     public float4   cloudLook1;
     public float4   cloudLook2;
     public float4   cloudLook3;
-    public float4   cloudOrigin;      // xy terrain rebase origin world XZ (blocks), zw reserved
+    // Terrain rebase origin, pushed UNFOLDED on all three axes so cloud_field/cloud.slang can
+    // reconstruct the true world coordinate (see cloud.slang "World anchor").
+    //   x: rebase origin world X (blocks)   y: rebase origin world Z (blocks)
+    //   z: cloud erosion-strength knob (0..1, carve amount)
+    //   w: rebase origin world Y (blocks)
+    public float4   cloudOrigin;
     public float4   sunUv;            // vanilla sun sprite atlas rect (u0,v0,u1,v1)
     public float4   moonUv;           // vanilla current-moon-phase sprite atlas rect
     public float4   waterParams;      // xyz linear ACEScg camera-biome water tint, w wave time (s)

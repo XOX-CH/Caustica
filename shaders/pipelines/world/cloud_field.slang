@@ -41,10 +41,11 @@ public static const float CLOUD_DROPLET_UM = 12.0;
 public static const float CLOUD_WEATHER_SPAN = 8192.0;
 public static const float CLOUD_MACROGRID_CELLS = 32.0;
 public static const float CLOUD_MACRO_CELL = CLOUD_WEATHER_SPAN / CLOUD_MACROGRID_CELLS;
-// Shape/erosion noise frequencies, cycles per block.
+// Shape/erosion noise frequencies, cycles per block. The erosion carve AMOUNT is a runtime knob
+// (CloudTuning::erosionStrength, pushed via cloudOrigin.z), not a constant, so players can dial how
+// much of the Worley field erodes each density value.
 public static const float CLOUD_SHAPE_FREQ = 1.0 / 110.0;
 public static const float CLOUD_EROSION_FREQ = 1.0 / 15.0;
-public static const float CLOUD_EROSION_STRENGTH = 0.42;
 // Multiplier on the MS LUT's higher-order and ambient terms only. The order-1 NEE term is not
 // scaled by it (bake normalisation calibration).
 public static const float CLOUD_MS_STRENGTH = 1.0;
@@ -273,12 +274,28 @@ public float cloudDensityLwcBase(float k) {
     return lerp(0.80, 0.45, saturate(k));
 }
 
-// Horizontal weather-domain advection in blocks, from (wind speed, blocks/s; cloud time, s).
-// One implementation for the runtime shape scroll and both weather bakes, because the bake passes
-// hold their own WorldPush copy and cannot read the runtime's global — the caller passes the pair
-// explicitly so all three sites cannot drift apart.
-public float2 cloudWindOffset(float2 windSpeedAndTime) {
-    return CLOUD_WIND_DIR * max(windSpeedAndTime.x, 0.0) * windSpeedAndTime.y;
+// Horizontal weather-domain advection in blocks. One implementation serves the runtime and both
+// weather bakes, because the bake passes hold their own WorldPush copy and cannot read the runtime's
+// global — the caller passes the accrued scalar explicitly so all three sites cannot drift apart.
+// WIND SCROLL: the displacement is pre-integrated on the CPU (windSpeed · dt, accrued every frame)
+// and pushed as a scalar distance along the fixed wind direction, so the result is never reconstructed
+// from windSpeed × time in here — a mid-session wind-speed change only re-scales the drift rate and
+// cannot snap the whole sky. The weather field is genuinely tile-periodic in XZ with period
+// CLOUD_WEATHER_SPAN (weatherValueNoise wraps its lattice at the tile), so the CPU folds the integral
+// to [0, SPAN): an offset of SPAN + x and x address identical texels, keeping the pushed scalar
+// float-exact at any runtime or walk distance. Callers must NOT multiply the result by time again.
+public float2 cloudWindOffset(float windDistance) {
+    float d = windDistance - floor(windDistance / CLOUD_WEATHER_SPAN) * CLOUD_WEATHER_SPAN;
+    return CLOUD_WIND_DIR * d;
+}
+
+// The SHAPE scroll's wind shaft: the SAME integrated distance, unfurled. The 3D shape fBm is not
+// tile-periodic (cloudHash13 is an aperiodic hash lattice), so folding it would teleport fine cloud
+// structure every tile width of travel — the shape takes the raw integral instead, which is the only
+// continuous choice. One accrued scalar drives both weather and shape, so the two wind uses can never
+// drift in direction or speed.
+public float2 cloudWindShaft(float windDistance) {
+    return CLOUD_WIND_DIR * windDistance;
 }
 
 // ---- Weather field ------------------------------------------------------------------------------
@@ -309,7 +326,14 @@ float weatherValueNoise(float2 p, int period) {
  */
 public float weatherCoverageField(float2 uv, float bias, float2 windOffsetBlocks) {
     float2 advected = uv + windOffsetBlocks / CLOUD_WEATHER_SPAN;
-    float2 p = advected * 8.0; // 8 tile-scale features across the weather cell
+    // Domain-warp the sample lattice so mass footprints billow organically instead of resolving at
+    // the square tile scale: the low-frequency warp bends the clear/cloud interface, so silhouettes
+    // read as connected weather systems rather than axis-aligned slabs and edges fade continuously.
+    // The warp runs in the same advected frame, and both the weather bake and the macrogrid majorant
+    // reduce this same field, so the runtime hop-skip stays consistent with the rendered density.
+    float2 warp = float2(weatherValueNoise(advected * 2.0, 2),
+                         weatherValueNoise(advected * 2.0 + 7.13, 2));
+    float2 p = (advected + (warp - 0.5) * 0.22) * 8.0; // 8 tile-scale features across the weather cell
     float sum = 0.0;
     float amp = 0.5;
     float norm = 0.0;
@@ -336,12 +360,31 @@ public float weatherTypeField(float2 uv, float2 windOffsetBlocks) {
     return saturate((field - 0.25) / 0.5);
 }
 
-// Height profile: flat eroded bases, rounded tops; type stretches the vertical extent from thin
-// stratus to full cumulus. 0..1 vertical support at this height fraction.
-public float heightProfile(float hf, float type) {
-    float base = cloudRemap(hf, 0.0, 0.04 + 0.10 * type);
-    float topStart = lerp(0.28, 0.62, type);
-    float topEnd = lerp(0.42, 1.0, type);
+// Vertical relief field for the weather map's blue channel (C2): an independent very-low-frequency
+// noise that lifts or lowers whole cloud masses in the shell, OUTSIDE the type field's base/top
+// stretch trade. Like the type field it advects with the wind (slower, so it stays a broad sky-scale
+// feature), and it sits around 0.5 so the mapped lift in heightProfile is zero at mid-field.
+public float weatherHeightLiftField(float2 uv, float2 windOffsetBlocks) {
+    float2 advected = uv + windOffsetBlocks * 0.3 / CLOUD_WEATHER_SPAN;
+    float field = weatherValueNoise(advected * 2.0, 2);
+    field = weatherValueNoise(advected * 2.0 + field * 0.6, 2);
+    return saturate(field);
+}
+
+// Height profile: scalloped bases, rounded tops; type stretches the vertical extent from thin
+// stratus to full cumulus. `lift` (from the weather map's blue channel) shifts the WHOLE mass —
+// base floor AND rounded top together — so a billow can sit higher in the shell without compressing
+// its thickness. 0..1 vertical support at this height fraction.
+public float heightProfile(float hf, float type, float lift) {
+    float relief = (lift - 0.5) * 0.5; // ±0.25 of the shell's height; neutral near the field mean
+    // Widen the base band and cup the underside so bottoms lift in a soft arc instead of a
+    // knife-edge floor — a flat base reads the cloud as a vanilla square slab rather than a
+    // billowing volume.
+    float baseBand = 0.10 + 0.14 * type;
+    float base = cloudRemap(hf, 0.0 + relief, baseBand + relief);
+    float topStart = lerp(0.28, 0.62, type) + relief;
+    float topEnd = lerp(0.42, 1.0, type) + relief;
     float top = 1.0 - cloudRemap(hf, topStart, topEnd);
+    base *= lerp(0.35, 1.0, smoothstep(relief, baseBand + relief, hf));
     return base * top;
 }
