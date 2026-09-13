@@ -147,7 +147,7 @@ public final class RtRayTracingOptions {
 
     private static ResetableOption cloudDensity() {
         return hundredthsSlider("caustica.options.rt.cloudDensity",
-                CausticaConfig.Rt.Cloud.DENSITY, 10, 200, 100);
+                CausticaConfig.Rt.Cloud.DENSITY, 0, 100, 50);
     }
 
     private static ResetableOption cloudWindSpeed() {

@@ -78,7 +78,8 @@ public struct WorldPush {
     //   cloudLook0: x weather coverage bias (config baseline + MC rain, folded on the CPU),
     //               y wind speed (blocks/s), z cloud time (s), w shell base altitude (km).
     //   cloudLook1: x shell bottom Y (rebased blocks), y shell top Y (rebased blocks),
-    //               z density scale, w enabled (0/1).
+    //               z perceived density k (0..1; extinction, shape fullness and the LWC ramp
+    //               all derive from it in cloud_field.slang), w enabled (0/1).
     //   cloudLook2: x shape fBm octaves, y erosion neighbourhood (0 none / 1 eight-cell / 2
     //               twenty-seven-cell), z event-shadow precision (0 Beer everywhere / 1 first event
     //               exact / 2 exact everywhere), w reserved.

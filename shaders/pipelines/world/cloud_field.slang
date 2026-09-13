@@ -25,9 +25,10 @@ public float cloudRndf(inout uint s) {
 
 // ---- Tunables -----------------------------------------------------------------------------------
 
-// Peak extinction of a fully dense cloud voxel, 1/blocks. Real cumulus is 0.2–1.0 /block at
-// 1 block = 10 m; the default sits mid-range so thick cores read near-opaque while edges stay
-// wispy. cloudLook1.z (densityScale) multiplies this.
+// Peak extinction of a fully dense cloud voxel at the reference density, 1/blocks. Real cumulus
+// is 0.2–1.0 /block at 1 block = 10 m; the default sits mid-range so thick cores read near-opaque
+// while edges stay wispy. cloudLook1.z (perceived density k, 0..1) scales this through
+// cloudDensitySigmaScale, topping out at ~1.7 /block — the heavy-cumulus end of the range.
 public static const float CLOUD_MAX_SIGMA = 0.35;
 // Single-scattering albedo of cloud water in the visible — almost 1, kept slightly under so
 // Russian roulette terminates and the deepest interiors pick up a hint of grey.
@@ -237,6 +238,40 @@ public float cloudRemap(float v, float lo, float hi) {
 // weather bake advects with the same vector so shapes move coherently. Stored pre-normalised
 // (normalize(float2(0.86, 0.51))) because Slang's normalize is not a constant expression.
 public static const float2 CLOUD_WIND_DIR = float2(0.860129, 0.510077);
+
+// ---- Perceived density mapping -------------------------------------------------------------------
+//
+// The density control is a single perceptual knob k ∈ [0, 1] (cloudLook1.z) that drives three
+// coupled mappings, because what reads as "density" is not one number:
+//
+//   extinction — transmittance is exp(−σ·τ), logarithmic in σ, so a linear σ scale bunches all
+//                visible change into a narrow band. The exponential map makes every slider step an
+//                equal step of perceived opacity; k = 0.5 reproduces the physical reference
+//                (CLOUD_MAX_SIGMA verbatim), k = 0 is hard-gated to clear air.
+//   fullness   — denser air masses hold water out to their edges while thin ones keep it only in
+//                their cores, so the shaped density is morphed by a power curve: > 1 starves the
+//                edge falloff (wispy remnants), < 1 fattens it (cauliflower after erosion).
+//   LWC ramp   — liquid water content rises with height above cloud base (adiabatic). The ramp's
+//                base floor deepens with k: thin clouds read uniform, thick ones bottom-dark.
+//
+// Every mapping preserves the bound σ ≤ CLOUD_MAX_SIGMA × sigmaScale(k), so the macrogrid
+// majorant (cloud.slang) stays valid by evaluating the same sigmaScale.
+
+// Extinction scale for the density knob. ±2.25 stops around the k = 0.5 reference: 0.21×–4.76×.
+public float cloudDensitySigmaScale(float k) {
+    return k <= 0.0 ? 0.0 : exp2((saturate(k) - 0.5) * 4.5);
+}
+
+// Power-curve exponent of the shape-fullness morph: 1.75 (cores only) .. 1.0 (reference) .. 0.55
+// (edges filled).
+public float cloudDensityShapePow(float k) {
+    return lerp(1.75, 0.55, saturate(k));
+}
+
+// Density factor at cloud base for the LWC ramp; the factor rises to 1.0 at the shell top.
+public float cloudDensityLwcBase(float k) {
+    return lerp(0.80, 0.45, saturate(k));
+}
 
 // Horizontal weather-domain advection in blocks, from (wind speed, blocks/s; cloud time, s).
 // One implementation for the runtime shape scroll and both weather bakes, because the bake passes

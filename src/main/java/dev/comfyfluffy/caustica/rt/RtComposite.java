@@ -806,7 +806,7 @@ public final class RtComposite {
                         skyLut.sampler());
                 if (cloudLut != null) {
                     worldPipeline.setCloudTextures(cloudLut.weatherView(), cloudLut.msLutView(),
-                            cloudLut.macroGridView(), cloudLut.sampler());
+                            cloudLut.macroGridView(), cloudLut.repeatSampler(), cloudLut.clampSampler());
                 }
             }
         }

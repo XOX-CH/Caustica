@@ -696,8 +696,10 @@ public final class CausticaConfig {
             // Estimator parameters. These change sampling variance and the thick-core truncation
             // only, so their error arrives as per-frame noise the temporal denoiser integrates away.
             //
-            // Free-flight step cap per segment. Only bites inside optically thick cores, where the
-            // albedo roulette or the transmittance floor usually ends the walk first.
+            // Strides per shell crossing of the primary cloud walk. The walk renormalises its
+            // strides against the remaining interval, so any count spans the whole crossing —
+            // cost is linear and independent of density and crossing length, and more strides
+            // buy quadrature accuracy (cleaner thick-core edges), not reach.
             public static final IntSetting PATH_STEPS =
                     clampedInt("caustica.rt.cloudPathSteps", "cloud.path-steps", 24, 4, 64);
             // Strides per shadow transmittance walk, and the stride length as a fraction of the
@@ -707,8 +709,8 @@ public final class CausticaConfig {
                     clampedInt("caustica.rt.cloudShadowSteps", "cloud.shadow-steps", 12, 1, 48);
             public static final FloatSetting STRIDE_SCALE =
                     clampedFloat("caustica.rt.cloudStrideScale", "cloud.stride-scale", 0.4f, 0.1f, 1.0f);
-            // Running-product floor that ends a walk early. Higher is cheaper and lets very thick
-            // cores drift slightly transparent.
+            // Running-product floor that ends a shadow transmittance walk early. Higher is cheaper
+            // and lets very thick cores drift slightly transparent.
             public static final FloatSetting EXIT_FLOOR =
                     clampedFloat("caustica.rt.cloudExitFloor", "cloud.exit-floor", 0.02f, 0.001f, 0.2f);
             // Event-shadow precision: 0 = Beer on the local tau everywhere, 1 = exact transmittance
@@ -718,9 +720,11 @@ public final class CausticaConfig {
             // Weather coverage baseline 0..1; Minecraft's rain level lifts it further (up to +0.35).
             public static final FloatSetting COVERAGE =
                     clampedFloat("caustica.rt.cloud.coverage", "cloud.coverage", 0.42f, 0.0f, 1.0f);
-            // Peak extinction multiplier; 1.0 = CLOUD_MAX_SIGMA (0.35 / block).
+            // Perceived cloud thickness 0..1; the shader maps it exponentially onto extinction
+            // (0.5 = the CLOUD_MAX_SIGMA physical reference) and couples it with shape fullness
+            // and the vertical liquid-water gradient (cloud_field.slang "Perceived density").
             public static final FloatSetting DENSITY =
-                    clampedFloat("caustica.rt.cloud.density", "cloud.density", 1.0f, 0.1f, 2.0f);
+                    clampedFloat("caustica.rt.cloud.thickness", "cloud.thickness", 0.5f, 0.0f, 1.0f);
             // Trade-wind speed in blocks per second (weather advection + shape shear).
             public static final FloatSetting WIND_SPEED =
                     clampedFloat("caustica.rt.cloud.windSpeed", "cloud.wind-speed", 6.0f, 0.0f, 30.0f);

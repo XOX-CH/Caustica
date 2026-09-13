@@ -42,8 +42,8 @@ import static dev.comfyfluffy.caustica.rt.pipeline.RtBindings.*;
  *   <li><b>Weather map</b> 128x128 RGBA8 — per frame: R = coverage (config baseline + Minecraft
  *       rain, advected by wind), G = cloud type (0 stratus .. 1 cumulus). Rasterised from
  *       {@code weatherCoverageField}, the single source of truth.</li>
- *   <li><b>Macrogrid</b> 32x32 R16F — per frame: per-cell max coverage, the tracking accelerator
- *       that lets delta/ratio tracking skip empty columns with one fetch.</li>
+ *   <li><b>Macrogrid</b> 32x32 R16F — per frame: per-cell max coverage, the empty-space skip
+ *       structure that lets both cloud walks hop empty columns with one fetch.</li>
  *   <li><b>Multiple-scattering LUT</b> 32x32 RGBA16F — static: RGB = higher-order (≥2)
  *       sun/moon fluence per unit illuminance, A = the same for unit-radiance sky light, both
  *       normalised by 1/(4π) so the runtime source term is σt × LUT. Depends only on droplet size
@@ -68,7 +68,8 @@ public final class RtCloudLut {
     private final RtImage weather;
     private final RtImage macroGrid;
     private final RtImage msLut;
-    private final long sampler;
+    private final long repeatSampler;
+    private final long clampSampler;
     private final long descriptorSetLayout;
     private final long descriptorPool;
     private final long descriptorSet;
@@ -80,14 +81,15 @@ public final class RtCloudLut {
     private boolean destroyed;
 
     private RtCloudLut(RtContext ctx, RtImage weather, RtImage macroGrid, RtImage msLut,
-                       long sampler, long descriptorSetLayout, long descriptorPool,
-                       long descriptorSet, long pipelineLayout, long weatherPipeline,
-                       long macroGridPipeline, long msLutPipeline) {
+                       long repeatSampler, long clampSampler, long descriptorSetLayout,
+                       long descriptorPool, long descriptorSet, long pipelineLayout,
+                       long weatherPipeline, long macroGridPipeline, long msLutPipeline) {
         this.ctx = ctx;
         this.weather = weather;
         this.macroGrid = macroGrid;
         this.msLut = msLut;
-        this.sampler = sampler;
+        this.repeatSampler = repeatSampler;
+        this.clampSampler = clampSampler;
         this.descriptorSetLayout = descriptorSetLayout;
         this.descriptorPool = descriptorPool;
         this.descriptorSet = descriptorSet;
@@ -106,19 +108,28 @@ public final class RtCloudLut {
         RtImage msLut = ctx.createStorageImage(MS_LUT_SIZE, MS_LUT_SIZE,
                 VK10.VK_FORMAT_R16G16B16A16_SFLOAT, "cloud multiple-scattering LUT");
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            // CLAMP on both axes: the weather tile wraps via frac() in the shader, never via the
-            // sampler; the macrogrid and the LUT are parameter-space tables.
+            // Two samplers. The weather map and the macrogrid wrap via frac() in the shader, so
+            // their sampler must REPEAT: bilinear filtering across the tile boundary has to
+            // blend texel N-1 with texel 0 — CLAMP would flatten a half-texel band on each side
+            // and cut a vertical corridor through the cloud field at every tile edge. The MS LUT
+            // is a parameter-space table whose opposite edges are unrelated, so it stays CLAMP.
             VkSamplerCreateInfo samplerInfo = VkSamplerCreateInfo.calloc(stack).sType$Default()
                     .magFilter(VK10.VK_FILTER_LINEAR).minFilter(VK10.VK_FILTER_LINEAR)
                     .mipmapMode(VK10.VK_SAMPLER_MIPMAP_MODE_NEAREST)
-                    .addressModeU(VK10.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
-                    .addressModeV(VK10.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
-                    .addressModeW(VK10.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                    .addressModeU(VK10.VK_SAMPLER_ADDRESS_MODE_REPEAT)
+                    .addressModeV(VK10.VK_SAMPLER_ADDRESS_MODE_REPEAT)
+                    .addressModeW(VK10.VK_SAMPLER_ADDRESS_MODE_REPEAT)
                     .minLod(0.0f).maxLod(0.0f);
             LongBuffer handle = stack.mallocLong(1);
-            check(VK10.vkCreateSampler(vk, samplerInfo, null, handle), "vkCreateSampler(cloud LUT)");
-            long sampler = handle.get(0);
-            RtDebugLabels.name(ctx, VK10.VK_OBJECT_TYPE_SAMPLER, sampler, "cloud LUT sampler");
+            check(VK10.vkCreateSampler(vk, samplerInfo, null, handle), "vkCreateSampler(cloud repeat)");
+            long repeatSampler = handle.get(0);
+            RtDebugLabels.name(ctx, VK10.VK_OBJECT_TYPE_SAMPLER, repeatSampler, "cloud repeat sampler");
+            samplerInfo.addressModeU(VK10.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                    .addressModeV(VK10.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE)
+                    .addressModeW(VK10.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
+            check(VK10.vkCreateSampler(vk, samplerInfo, null, handle), "vkCreateSampler(cloud clamp)");
+            long clampSampler = handle.get(0);
+            RtDebugLabels.name(ctx, VK10.VK_OBJECT_TYPE_SAMPLER, clampSampler, "cloud clamp sampler");
 
             VkDescriptorSetLayoutBinding.Buffer bindings = VkDescriptorSetLayoutBinding.calloc(3, stack);
             for (int i = 0; i < 3; i++) {
@@ -185,14 +196,18 @@ public final class RtCloudLut {
             }
             VK10.vkUpdateDescriptorSets(vk, writes, null);
 
-            return new RtCloudLut(ctx, weather, macroGrid, msLut, sampler, descriptorSetLayout,
-                    descriptorPool, descriptorSet, pipelineLayout, weatherPipeline,
-                    macroGridPipeline, msLutPipeline);
+            return new RtCloudLut(ctx, weather, macroGrid, msLut, repeatSampler, clampSampler,
+                    descriptorSetLayout, descriptorPool, descriptorSet, pipelineLayout,
+                    weatherPipeline, macroGridPipeline, msLutPipeline);
         }
     }
 
-    public long sampler() {
-        return sampler;
+    public long repeatSampler() {
+        return repeatSampler;
+    }
+
+    public long clampSampler() {
+        return clampSampler;
     }
 
     public long weatherView() {
@@ -249,7 +264,8 @@ public final class RtCloudLut {
         VK10.vkDestroyPipelineLayout(vk, pipelineLayout, null);
         VK10.vkDestroyDescriptorPool(vk, descriptorPool, null);
         VK10.vkDestroyDescriptorSetLayout(vk, descriptorSetLayout, null);
-        VK10.vkDestroySampler(vk, sampler, null);
+        VK10.vkDestroySampler(vk, repeatSampler, null);
+        VK10.vkDestroySampler(vk, clampSampler, null);
         msLut.destroy();
         macroGrid.destroy();
         weather.destroy();

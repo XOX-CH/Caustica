@@ -460,11 +460,13 @@ public final class RtPipeline {
         writeAtlasBinding(WORLD_TRANSMITTANCE, transmittanceImageView, sampler);
     }
 
-    /** Bind the cloud bake images (see {@link RtCloudLut}); all share the cloud sampler. */
-    public void setCloudTextures(long weatherView, long msLutView, long macroGridView, long sampler) {
-        writeAtlasBinding(WORLD_CLOUD_WEATHER, weatherView, sampler);
-        writeAtlasBinding(WORLD_CLOUD_MS_LUT, msLutView, sampler);
-        writeAtlasBinding(WORLD_CLOUD_MACROGRID, macroGridView, sampler);
+    /** Bind the cloud bake images (see {@link RtCloudLut}): weather/macrogrid share the REPEAT
+     * sampler (shader-side frac wrap), the MS LUT uses the CLAMP sampler (parameter space). */
+    public void setCloudTextures(long weatherView, long msLutView, long macroGridView,
+                                 long repeatSampler, long clampSampler) {
+        writeAtlasBinding(WORLD_CLOUD_WEATHER, weatherView, repeatSampler);
+        writeAtlasBinding(WORLD_CLOUD_MS_LUT, msLutView, clampSampler);
+        writeAtlasBinding(WORLD_CLOUD_MACROGRID, macroGridView, repeatSampler);
     }
 
     private void writeAtlasBinding(int binding, long imageView, long sampler) {

@@ -1,9 +1,8 @@
 // Macrogrid bake, once per frame: reduces the weather coverage field to a 32×32 grid of per-cell
-// maxima. This is the tracking accelerator — a column whose cell maximum is ~0 cannot hold cloud
-// density anywhere along it (density is gated by coverage), so delta tracking and ratio tracking
-// hop cell-to-cell and skip whole columns with one fetch. Not a strict per-voxel majorant: inside
-// a covered cell the tracker falls back to the global CLOUD_MAX_SIGMA bound, which density never
-// exceeds (the coverage remap never amplifies past it).
+// maxima. This is the empty-space skip structure — a column whose cell maximum is ~0 cannot hold
+// cloud density anywhere along it (density is gated by coverage), so the primary walk and the
+// shadow march hop cell-to-cell and skip whole columns with one fetch instead of evaluating σt
+// stride by stride.
 import world_common;
 import cloud_field;
 

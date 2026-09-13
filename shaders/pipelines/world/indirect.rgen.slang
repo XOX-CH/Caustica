@@ -106,8 +106,8 @@ public float3 tracePath(PathSegment seg, uint2 pix, uint sampleIndex) {
 
             // Cloud shell integration for the segment that escapes to sky: in-medium scattering
             // events continue the loop (each consumes one bounce slot); a clean passthrough
-            // attenuates the sky radiance by the ratio-tracked shell transmittance. This is where
-            // backlit silver linings and sun-through-cloud god rays are produced.
+            // attenuates the sky radiance by the stride-quadrature shell transmittance. This is
+            // where backlit silver linings and sun-through-cloud god rays are produced.
             {
                 float tEnter, tExit;
                 if (cloudShellInterval(ro, rd, 10000.0, tEnter, tExit)) {
